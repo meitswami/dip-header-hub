@@ -6,8 +6,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const OLLAMA_URL = Deno.env.get("OLLAMA_URL") || "http://host.docker.internal:11434";
-const OLLAMA_MODEL = Deno.env.get("OLLAMA_MODEL") || "phi3:mini";
+const DEFAULT_OLLAMA_URL = Deno.env.get("OLLAMA_URL") || "http://host.docker.internal:11434";
+const DEFAULT_OLLAMA_MODEL = Deno.env.get("OLLAMA_MODEL") || "phi3:mini";
 
 // ── Helper: compute deep CDR analytics directly from records ──
 async function buildLiveAnalytics(supabase: any, caseId: string): Promise<string> {
@@ -292,7 +292,9 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { messages, caseId } = await req.json();
+    const { messages, caseId, ollamaUrl, ollamaModel } = await req.json();
+    const OLLAMA_URL = ollamaUrl?.replace(/\/+$/, '') || DEFAULT_OLLAMA_URL;
+    const OLLAMA_MODEL = ollamaModel || DEFAULT_OLLAMA_MODEL;
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;

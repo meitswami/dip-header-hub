@@ -137,6 +137,8 @@ export default function KnowledgeBase() {
     setQaLoading(true);
 
     try {
+      const ollamaRaw = localStorage.getItem('dip-ollama-settings');
+      const ollamaSettings = ollamaRaw ? JSON.parse(ollamaRaw) : {};
       const resp = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/kb-query`,
         {
@@ -148,6 +150,8 @@ export default function KnowledgeBase() {
           body: JSON.stringify({
             question: userMsg.content,
             messages: qaMessages.concat(userMsg),
+            ollamaUrl: ollamaSettings.url,
+            ollamaModel: ollamaSettings.model,
           }),
         }
       );

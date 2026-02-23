@@ -7,8 +7,8 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const OLLAMA_URL = Deno.env.get("OLLAMA_URL") || "http://host.docker.internal:11434";
-const OLLAMA_MODEL = Deno.env.get("OLLAMA_VISION_MODEL") || Deno.env.get("OLLAMA_MODEL") || "llava:7b";
+const DEFAULT_OLLAMA_URL = Deno.env.get("OLLAMA_URL") || "http://host.docker.internal:11434";
+const DEFAULT_OLLAMA_MODEL = Deno.env.get("OLLAMA_VISION_MODEL") || Deno.env.get("OLLAMA_MODEL") || "llava:7b";
 
 serve(async (req) => {
   if (req.method === "OPTIONS")
@@ -29,7 +29,9 @@ serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     );
 
-    const { documentId } = await req.json();
+    const { documentId, ollamaUrl, ollamaModel } = await req.json();
+    const OLLAMA_URL = ollamaUrl?.replace(/\/+$/, '') || DEFAULT_OLLAMA_URL;
+    const OLLAMA_MODEL = ollamaModel || DEFAULT_OLLAMA_MODEL;
     if (!documentId) {
       return new Response(
         JSON.stringify({ error: "documentId is required" }),

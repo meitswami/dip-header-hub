@@ -158,6 +158,8 @@ export default function AIChat() {
     setLoading(true);
 
     try {
+      const ollamaRaw = localStorage.getItem('dip-ollama-settings');
+      const ollamaSettings = ollamaRaw ? JSON.parse(ollamaRaw) : {};
       const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-chat`;
       const resp = await fetch(CHAT_URL, {
         method: 'POST',
@@ -168,6 +170,8 @@ export default function AIChat() {
         body: JSON.stringify({
           messages: newMessages.map(m => ({ role: m.role, content: m.content })),
           caseId: selectedCase,
+          ollamaUrl: ollamaSettings.url,
+          ollamaModel: ollamaSettings.model,
         }),
       });
 

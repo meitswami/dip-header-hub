@@ -139,6 +139,8 @@ export default function CaseDocumentManager({ caseId }: Props) {
   async function triggerOCR(documentId: string) {
     setOcrProcessing(prev => new Set(prev).add(documentId));
     try {
+      const ollamaRaw = localStorage.getItem('dip-ollama-settings');
+      const ollamaSettings = ollamaRaw ? JSON.parse(ollamaRaw) : {};
       const { data: { session } } = await supabase.auth.getSession();
       const resp = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ocr-document`,
@@ -148,7 +150,11 @@ export default function CaseDocumentManager({ caseId }: Props) {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${session?.access_token}`,
           },
-          body: JSON.stringify({ documentId }),
+          body: JSON.stringify({
+            documentId,
+            ollamaUrl: ollamaSettings.url,
+            ollamaModel: ollamaSettings.model,
+          }),
         }
       );
       if (!resp.ok) {

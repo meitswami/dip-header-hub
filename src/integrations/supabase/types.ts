@@ -93,18 +93,21 @@ export type Database = {
       case_assignments: {
         Row: {
           case_id: string
+          case_role: string
           created_at: string
           id: string
           user_id: string
         }
         Insert: {
           case_id: string
+          case_role?: string
           created_at?: string
           id?: string
           user_id: string
         }
         Update: {
           case_id?: string
+          case_role?: string
           created_at?: string
           id?: string
           user_id?: string
@@ -434,6 +437,111 @@ export type Database = {
           },
         ]
       }
+      data_access_grants: {
+        Row: {
+          case_id: string
+          created_at: string
+          evidence_log_id: string
+          granted_by: string | null
+          granted_to: string
+          id: string
+        }
+        Insert: {
+          case_id: string
+          created_at?: string
+          evidence_log_id: string
+          granted_by?: string | null
+          granted_to: string
+          id?: string
+        }
+        Update: {
+          case_id?: string
+          created_at?: string
+          evidence_log_id?: string
+          granted_by?: string | null
+          granted_to?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "data_access_grants_case_id_fkey"
+            columns: ["case_id"]
+            isOneToOne: false
+            referencedRelation: "cases"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "data_access_grants_evidence_log_id_fkey"
+            columns: ["evidence_log_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_logs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      data_procurements: {
+        Row: {
+          case_id: string
+          created_at: string
+          data_type: string
+          evidence_log_id: string | null
+          id: string
+          notes: string | null
+          operator_name: string | null
+          period_from: string | null
+          period_to: string | null
+          phone_number: string | null
+          procured_by: string | null
+          request_ref_no: string | null
+          status: string
+        }
+        Insert: {
+          case_id: string
+          created_at?: string
+          data_type: string
+          evidence_log_id?: string | null
+          id?: string
+          notes?: string | null
+          operator_name?: string | null
+          period_from?: string | null
+          period_to?: string | null
+          phone_number?: string | null
+          procured_by?: string | null
+          request_ref_no?: string | null
+          status?: string
+        }
+        Update: {
+          case_id?: string
+          created_at?: string
+          data_type?: string
+          evidence_log_id?: string | null
+          id?: string
+          notes?: string | null
+          operator_name?: string | null
+          period_from?: string | null
+          period_to?: string | null
+          phone_number?: string | null
+          procured_by?: string | null
+          request_ref_no?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "data_procurements_case_id_fkey"
+            columns: ["case_id"]
+            isOneToOne: false
+            referencedRelation: "cases"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "data_procurements_evidence_log_id_fkey"
+            columns: ["evidence_log_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_logs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       evidence_logs: {
         Row: {
           case_id: string
@@ -758,8 +866,11 @@ export type Database = {
           case_id: string | null
           created_at: string
           id: string
+          link: string | null
           message: string | null
+          notification_type: string | null
           read: boolean
+          sender_id: string | null
           title: string
           user_id: string
         }
@@ -767,8 +878,11 @@ export type Database = {
           case_id?: string | null
           created_at?: string
           id?: string
+          link?: string | null
           message?: string | null
+          notification_type?: string | null
           read?: boolean
+          sender_id?: string | null
           title: string
           user_id: string
         }
@@ -776,8 +890,11 @@ export type Database = {
           case_id?: string | null
           created_at?: string
           id?: string
+          link?: string | null
           message?: string | null
+          notification_type?: string | null
           read?: boolean
+          sender_id?: string | null
           title?: string
           user_id?: string
         }
@@ -921,6 +1038,50 @@ export type Database = {
           },
         ]
       }
+      staff_messages: {
+        Row: {
+          attachment_data: Json | null
+          case_id: string | null
+          content: string
+          created_at: string
+          id: string
+          message_type: string
+          read_at: string | null
+          recipient_id: string | null
+          sender_id: string
+        }
+        Insert: {
+          attachment_data?: Json | null
+          case_id?: string | null
+          content: string
+          created_at?: string
+          id?: string
+          message_type?: string
+          read_at?: string | null
+          recipient_id?: string | null
+          sender_id: string
+        }
+        Update: {
+          attachment_data?: Json | null
+          case_id?: string | null
+          content?: string
+          created_at?: string
+          id?: string
+          message_type?: string
+          read_at?: string | null
+          recipient_id?: string | null
+          sender_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_messages_case_id_fkey"
+            columns: ["case_id"]
+            isOneToOne: false
+            referencedRelation: "cases"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tower_dump_records: {
         Row: {
           call_type: string | null
@@ -1009,6 +1170,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_case_role: {
+        Args: { _case_id: string; _user_id: string }
+        Returns: string
+      }
       get_user_role: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"]

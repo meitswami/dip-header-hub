@@ -6,6 +6,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const OLLAMA_URL = Deno.env.get("OLLAMA_URL") || "http://host.docker.internal:11434";
+const OLLAMA_MODEL = Deno.env.get("OLLAMA_MODEL") || "phi3:mini";
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -30,78 +33,57 @@ serve(async (req) => {
     if (fileName.endsWith(".txt") || fileName.endsWith(".md")) {
       text = await fileData.text();
     } else if (fileName.endsWith(".pdf")) {
-      // For PDFs, use AI to extract and summarize content
-      const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-      if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
-
-      // Convert PDF to base64 for AI processing
-      const arrayBuffer = await fileData.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
-      let binary = "";
-      for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
+      // For PDFs in offline mode, use Ollama for text extraction if available
+      // Otherwise mark as needing manual review
+      try {
+        const pdfText = await fileData.text();
+        // If it's a text-based PDF, we might get some content
+        if (pdfText && pdfText.trim().length > 50 && !pdfText.includes("%PDF")) {
+          text = pdfText;
+        } else {
+          // Use Ollama to summarize what we can extract
+          const resp = await fetch(`${OLLAMA_URL}/v1/chat/completions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: OLLAMA_MODEL,
+              messages: [{
+                role: "user",
+                content: `The following is raw content extracted from a PDF file named "${fileName}". Clean it up and extract all readable text. If it's mostly binary/unreadable, say "UNREADABLE_PDF".\n\n${pdfText.slice(0, 5000)}`,
+              }],
+            }),
+          });
+          if (resp.ok) {
+            const result = await resp.json();
+            const extracted = result.choices?.[0]?.message?.content || "";
+            if (!extracted.includes("UNREADABLE_PDF")) {
+              text = extracted;
+            } else {
+              text = "[PDF document - upload as .txt for automatic processing, or convert to text manually]";
+            }
+          } else {
+            text = "[PDF document - manual text extraction required for offline mode]";
+          }
+        }
+      } catch {
+        text = "[PDF document - manual text extraction required for offline mode]";
       }
-      const base64 = btoa(binary);
-
-      // Use AI to extract text from PDF
-      const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "text",
-                  text: "Extract ALL text content from this PDF document. Return the complete text content as-is, preserving structure, sections, headings, and all details. Do not summarize - extract everything word for word. If there are tables, format them clearly. This is for building a searchable knowledge base.",
-                },
-                {
-                  type: "image_url",
-                  image_url: {
-                    url: `data:application/pdf;base64,${base64}`,
-                  },
-                },
-              ],
-            },
-          ],
-        }),
-      });
-
-      if (!aiResp.ok) {
-        const errText = await aiResp.text();
-        console.error("AI extraction error:", errText);
-        throw new Error("Failed to extract text from PDF");
-      }
-
-      const aiResult = await aiResp.json();
-      text = aiResult.choices?.[0]?.message?.content || "";
     } else {
       // Try reading as text
       text = await fileData.text();
     }
 
     if (!text || text.trim().length === 0) {
-      await supabase.from("knowledge_base_documents").update({
-        status: "error",
-        error_message: "Could not extract any text from the document",
-        processing_completed_at: new Date().toISOString(),
-      }).eq("id", documentId);
-
       return new Response(JSON.stringify({ error: "No text extracted" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Chunk the text (approximately 1000 chars per chunk with overlap)
+    // Chunk the text (~1000 chars per chunk with overlap)
     const CHUNK_SIZE = 1000;
     const OVERLAP = 150;
-    const chunks: { content: string; chunk_index: number; page_number: number | null }[] = [];
+    const chunks: { chunk_text: string; chunk_index: number }[] = [];
     let start = 0;
     let idx = 0;
 
@@ -119,14 +101,9 @@ serve(async (req) => {
         }
       }
 
-      chunks.push({
-        content: chunkText.trim(),
-        chunk_index: idx,
-        page_number: null,
-      });
-
+      chunks.push({ chunk_text: chunkText.trim(), chunk_index: idx });
       start += chunkText.length - OVERLAP;
-      if (start <= 0 && idx > 0) break; // safety
+      if (start <= 0 && idx > 0) break;
       idx++;
     }
 
@@ -136,8 +113,7 @@ serve(async (req) => {
       const batch = chunks.slice(i, i + BATCH_SIZE).map(c => ({
         document_id: documentId,
         chunk_index: c.chunk_index,
-        content: c.content,
-        page_number: c.page_number,
+        chunk_text: c.chunk_text,
       }));
       const { error: chunkError } = await supabase
         .from("knowledge_base_chunks")
@@ -146,13 +122,6 @@ serve(async (req) => {
         console.error("Chunk insert error:", chunkError);
       }
     }
-
-    // Update document status
-    await supabase.from("knowledge_base_documents").update({
-      status: "completed",
-      chunk_count: chunks.length,
-      processing_completed_at: new Date().toISOString(),
-    }).eq("id", documentId);
 
     return new Response(JSON.stringify({
       success: true,
@@ -164,19 +133,6 @@ serve(async (req) => {
 
   } catch (e) {
     console.error("Processing error:", e);
-
-    // Try to update document status
-    try {
-      const { documentId } = await req.clone().json();
-      if (documentId) {
-        await supabase.from("knowledge_base_documents").update({
-          status: "error",
-          error_message: e instanceof Error ? e.message : "Unknown processing error",
-          processing_completed_at: new Date().toISOString(),
-        }).eq("id", documentId);
-      }
-    } catch {}
-
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -6,6 +6,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const OLLAMA_URL = Deno.env.get("OLLAMA_URL") || "http://host.docker.internal:11434";
+const OLLAMA_MODEL = Deno.env.get("OLLAMA_MODEL") || "phi3:mini";
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -13,38 +16,30 @@ serve(async (req) => {
     const { question, messages } = await req.json();
     if (!question) throw new Error("Missing question");
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
     // Search knowledge base chunks using text search
     const searchTerms = question.split(/\s+/).filter((w: string) => w.length > 2).slice(0, 10);
-    const searchQuery = searchTerms.join(" | ");
-
-    // Use ilike for broader matching
     let relevantChunks: string[] = [];
 
-    // Try trigram search first
     const { data: chunks } = await supabase
       .from("knowledge_base_chunks")
-      .select("content, document_id")
-      .or(searchTerms.map((t: string) => `content.ilike.%${t}%`).join(","))
+      .select("chunk_text, document_id")
+      .or(searchTerms.map((t: string) => `chunk_text.ilike.%${t}%`).join(","))
       .limit(20);
 
     if (chunks && chunks.length > 0) {
-      relevantChunks = chunks.map((c: any) => c.content);
+      relevantChunks = chunks.map((c: any) => c.chunk_text);
     }
 
-    // Also get document titles for context
+    // Get document titles for context
     const { data: docs } = await supabase
       .from("knowledge_base_documents")
-      .select("title, category")
-      .eq("status", "completed");
+      .select("title, file_type");
 
-    const docContext = docs?.map((d: any) => `- ${d.title} (${d.category})`).join("\n") || "No documents available";
+    const docContext = docs?.map((d: any) => `- ${d.title} (${d.file_type || "unknown"})`).join("\n") || "No documents available";
 
     const systemPrompt = `You are a Knowledge Base AI Assistant for a Digital Investigation Platform used by law enforcement in India. You have access to a knowledge base containing legal documents, SOPs, case laws, and reference materials.
 
@@ -69,13 +64,11 @@ RULES:
       ...(messages || []).slice(-6),
     ];
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch(`${OLLAMA_URL}/v1/chat/completions`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        model: OLLAMA_MODEL,
         messages: aiMessages,
         stream: true,
       }),
@@ -83,8 +76,8 @@ RULES:
 
     if (!response.ok) {
       const t = await response.text();
-      console.error("AI error:", response.status, t);
-      throw new Error("AI service error");
+      console.error("Ollama error:", response.status, t);
+      throw new Error(`Ollama error: ${response.status}. Is Ollama running?`);
     }
 
     return new Response(response.body, {

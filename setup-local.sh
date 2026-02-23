@@ -2,12 +2,13 @@
 set -euo pipefail
 
 # ===========================================
-# CDR Investigation Platform - Local Setup
+# DIP — Digital Investigation Platform
+# Complete Offline Setup Script
 # ===========================================
-# Prerequisites:
-#   1. Docker Desktop (running)
-#   2. Node.js >= 18
-#   3. Supabase CLI:  npm install -g supabase
+# This sets up DIP to run fully offline with:
+#   - Local PostgreSQL + Supabase Auth/Storage
+#   - Ollama for AI (local LLM)
+#   - Static frontend served by nginx
 #
 # Usage:
 #   chmod +x setup-local.sh
@@ -16,9 +17,15 @@ set -euo pipefail
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
-echo -e "${GREEN}=== CDR Investigation Platform - Local Setup ===${NC}"
+echo -e "${CYAN}"
+echo "╔═══════════════════════════════════════════════╗"
+echo "║   DIP - Digital Investigation Platform        ║"
+echo "║   Offline Setup                               ║"
+echo "╚═══════════════════════════════════════════════╝"
+echo -e "${NC}"
 
 # --- Check prerequisites ---
 check_cmd() {
@@ -30,8 +37,7 @@ check_cmd() {
 }
 
 check_cmd "docker" "Install Docker Desktop: https://www.docker.com/products/docker-desktop"
-check_cmd "node" "Install Node.js >= 18: https://nodejs.org"
-check_cmd "supabase" "Install: npm install -g supabase"
+check_cmd "ollama" "Install Ollama: https://ollama.ai/download"
 
 # Check Docker is running
 if ! docker info &>/dev/null; then
@@ -40,68 +46,93 @@ if ! docker info &>/dev/null; then
 fi
 echo -e "${GREEN}✓ Docker is running${NC}"
 
-# --- Install Node dependencies ---
-echo -e "\n${YELLOW}Installing Node dependencies...${NC}"
-npm install
+# Check Ollama is running
+if ! curl -s http://localhost:11434/api/tags &>/dev/null; then
+  echo -e "${YELLOW}⚠ Ollama is not running. Starting it...${NC}"
+  ollama serve &
+  sleep 3
+  if ! curl -s http://localhost:11434/api/tags &>/dev/null; then
+    echo -e "${RED}✗ Could not start Ollama. Please run 'ollama serve' manually.${NC}"
+    exit 1
+  fi
+fi
+echo -e "${GREEN}✓ Ollama is running${NC}"
 
-# --- Start Supabase locally ---
-echo -e "\n${YELLOW}Starting local Supabase (PostgreSQL, Auth, Storage, Edge Functions)...${NC}"
-echo -e "${YELLOW}This will automatically apply all migrations from supabase/migrations/${NC}"
-supabase start
+# --- Check/Pull AI Models ---
+echo -e "\n${YELLOW}=== AI Models ===${NC}"
 
-# --- Extract keys from supabase status ---
-echo -e "\n${YELLOW}Extracting local Supabase credentials...${NC}"
-API_URL=$(supabase status --output json 2>/dev/null | grep -o '"API URL":"[^"]*"' | cut -d'"' -f4 || echo "http://localhost:54321")
-ANON_KEY=$(supabase status --output json 2>/dev/null | grep -o '"anon key":"[^"]*"' | cut -d'"' -f4 || echo "")
-SERVICE_KEY=$(supabase status --output json 2>/dev/null | grep -o '"service_role key":"[^"]*"' | cut -d'"' -f4 || echo "")
+# Check RAM and recommend model
+TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || sysctl -n hw.memsize 2>/dev/null | awk '{print int($1/1024)}' || echo "8000000")
+TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1024 / 1024))
+echo -e "System RAM: ${CYAN}${TOTAL_RAM_GB}GB${NC}"
 
-if [ -z "$ANON_KEY" ]; then
-  echo -e "${YELLOW}Could not auto-extract keys. Run 'supabase status' and copy them manually.${NC}"
-  echo -e "${YELLOW}Then update your .env file.${NC}"
+if [ "$TOTAL_RAM_GB" -le 8 ]; then
+  echo -e "${YELLOW}Recommended model for ${TOTAL_RAM_GB}GB RAM: phi3:mini (~2.3GB)${NC}"
+  DEFAULT_MODEL="phi3:mini"
 else
-  # --- Create .env ---
-  cat > .env <<EOF
-VITE_SUPABASE_URL=${API_URL}
-VITE_SUPABASE_PUBLISHABLE_KEY=${ANON_KEY}
-VITE_SUPABASE_PROJECT_ID=local
-EOF
-  echo -e "${GREEN}✓ .env created with local credentials${NC}"
+  echo -e "${YELLOW}Recommended model: mistral:7b (~4GB)${NC}"
+  DEFAULT_MODEL="mistral:7b"
 fi
 
-# --- Create initial admin user ---
-echo -e "\n${YELLOW}=== Create Admin User ===${NC}"
-echo -e "You can create a user via the local Supabase Studio at:"
-echo -e "  ${GREEN}http://localhost:54323${NC}"
-echo -e "Or sign up through the app after starting it."
+# Pull the text model
+if ! ollama list | grep -q "${DEFAULT_MODEL}"; then
+  echo -e "${YELLOW}Pulling ${DEFAULT_MODEL}... (this may take a few minutes)${NC}"
+  ollama pull "${DEFAULT_MODEL}"
+else
+  echo -e "${GREEN}✓ ${DEFAULT_MODEL} already available${NC}"
+fi
 
-# --- Edge Functions ---
-echo -e "\n${YELLOW}=== Edge Functions ===${NC}"
-echo -e "To run edge functions locally:"
-echo -e "  ${GREEN}supabase functions serve${NC}"
-echo -e ""
-echo -e "Set secrets for edge functions:"
-echo -e "  ${GREEN}echo 'LOVABLE_API_KEY=your-key' >> supabase/.env${NC}"
-echo -e "  ${GREEN}supabase functions serve --env-file supabase/.env${NC}"
+# Optionally pull vision model for OCR
+echo -e "\n${YELLOW}Vision model (llava:7b) is needed for document OCR.${NC}"
+echo -e "${YELLOW}It requires ~4.5GB RAM. On 8GB systems, it may cause slowdowns.${NC}"
+read -p "Pull llava:7b for OCR support? (y/N) " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+  if ! ollama list | grep -q "llava:7b"; then
+    echo -e "${YELLOW}Pulling llava:7b...${NC}"
+    ollama pull llava:7b
+  else
+    echo -e "${GREEN}✓ llava:7b already available${NC}"
+  fi
+fi
 
-# --- Storage Buckets ---
-echo -e "\n${YELLOW}Creating storage buckets...${NC}"
-# These will be created via the seed script or manually
-echo -e "Storage buckets (evidence, knowledge-base, case-documents) need to be"
-echo -e "created via Supabase Studio at ${GREEN}http://localhost:54323/storage${NC}"
+# --- Create .env for docker-compose ---
+echo -e "\n${YELLOW}Creating environment configuration...${NC}"
+if [ ! -f .env.local ]; then
+  cat > .env.local <<EOF
+# DIP Offline Configuration
+POSTGRES_PASSWORD=dip_secure_password_2024
+JWT_SECRET=super-secret-jwt-token-for-dip-offline-mode-change-in-production
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU
+OLLAMA_URL=http://host.docker.internal:11434
+OLLAMA_MODEL=${DEFAULT_MODEL}
+EOF
+  echo -e "${GREEN}✓ .env.local created${NC}"
+else
+  echo -e "${GREEN}✓ .env.local already exists (skipping)${NC}"
+fi
 
-# --- Start the app ---
-echo -e "\n${GREEN}=== Setup Complete! ===${NC}"
+# --- Build and start ---
+echo -e "\n${YELLOW}Building and starting DIP...${NC}"
+docker compose --env-file .env.local up --build -d
+
+echo -e "\n${GREEN}╔═══════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║   DIP is starting up!                         ║${NC}"
+echo -e "${GREEN}╚═══════════════════════════════════════════════╝${NC}"
 echo -e ""
-echo -e "Start the development server:"
-echo -e "  ${GREEN}npm run dev${NC}"
+echo -e "  App:          ${CYAN}http://localhost:8080${NC}"
+echo -e "  Supabase API: ${CYAN}http://localhost:8000${NC}"
+echo -e "  Ollama:       ${CYAN}http://localhost:11434${NC}"
+echo -e "  PostgreSQL:   ${CYAN}localhost:54322${NC}"
 echo -e ""
-echo -e "Access points:"
-echo -e "  App:             ${GREEN}http://localhost:5173${NC}"
-echo -e "  Supabase Studio: ${GREEN}http://localhost:54323${NC}"
-echo -e "  Supabase API:    ${GREEN}${API_URL}${NC}"
+echo -e "  AI Model:     ${CYAN}${DEFAULT_MODEL}${NC}"
 echo -e ""
-echo -e "To stop Supabase:"
-echo -e "  ${GREEN}supabase stop${NC}"
+echo -e "${YELLOW}First start may take 1-2 minutes for DB migrations.${NC}"
 echo -e ""
-echo -e "To reset database (re-apply all migrations):"
-echo -e "  ${GREEN}supabase db reset${NC}"
+echo -e "Commands:"
+echo -e "  ${GREEN}docker compose logs -f${NC}         # View logs"
+echo -e "  ${GREEN}docker compose down${NC}            # Stop"
+echo -e "  ${GREEN}docker compose down -v${NC}         # Stop + reset DB"
+echo -e ""
+echo -e "${YELLOW}Sign up at http://localhost:8080 — emails auto-confirm in offline mode.${NC}"

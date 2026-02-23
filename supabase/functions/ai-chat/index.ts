@@ -6,13 +6,15 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// Ollama endpoint — configurable via env, defaults to localhost
+const OLLAMA_URL = Deno.env.get("OLLAMA_URL") || "http://host.docker.internal:11434";
+const OLLAMA_MODEL = Deno.env.get("OLLAMA_MODEL") || "phi3:mini";
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
     const { messages, caseId } = await req.json();
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -23,14 +25,14 @@ serve(async (req) => {
     if (caseId) {
       const { data: trainingLog } = await supabase
         .from("case_training_logs")
-        .select("case_profile, summary")
+        .select("training_data")
         .eq("case_id", caseId)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (trainingLog?.case_profile) {
-        const p = trainingLog.case_profile as any;
+      if (trainingLog?.training_data) {
+        const p = trainingLog.training_data as any;
         const parts: string[] = [];
         if (p.caseInfo) {
           parts.push(`CASE: ${p.caseInfo.title || ""} | FIR: ${p.caseInfo.fir_number || "N/A"} | Sections: ${p.caseInfo.sections || "N/A"} | Status: ${p.caseInfo.status}`);
@@ -44,7 +46,7 @@ serve(async (req) => {
         if (p.towerSummary?.uniqueTowers) parts.push(`UNIQUE TOWERS: ${p.towerSummary.uniqueTowers}`);
         if (p.subscribers?.length) parts.push(`SUBSCRIBERS: ${p.subscribers.map((s: any) => `${s.subscriber_name||""} ${s.phone_number||""}`).join("; ")}`);
         if (p.aliases?.length) parts.push(`ALIASES: ${p.aliases.map((a: any) => `${a.phone_number}=${a.alias_name}`).join(", ")}`);
-        if (p.persons?.length) parts.push(`PERSONS: ${p.persons.map((pp: any) => `${pp.name}(${pp.role_in_case||""})`).join(", ")}`);
+        if (p.persons?.length) parts.push(`PERSONS: ${p.persons.map((pp: any) => `${pp.name}(${pp.role||""})`).join(", ")}`);
         if (p.insights?.length) parts.push(`INSIGHTS: ${p.insights.map((i: any) => `[${i.insight_type}] ${i.title}`).join("; ")}`);
         if (p.documentTitles?.length) parts.push(`CASE DOCUMENTS: ${p.documentTitles.join(", ")}`);
         caseContext = parts.join("\n");
@@ -59,11 +61,11 @@ serve(async (req) => {
       if (searchTerms.length > 0) {
         const { data: chunks } = await supabase
           .from("knowledge_base_chunks")
-          .select("content")
-          .or(searchTerms.map((t: string) => `content.ilike.%${t}%`).join(","))
+          .select("chunk_text")
+          .or(searchTerms.map((t: string) => `chunk_text.ilike.%${t}%`).join(","))
           .limit(10);
         if (chunks?.length) {
-          kbContext = "KNOWLEDGE BASE REFERENCES:\n" + chunks.map((c: any) => c.content).join("\n---\n");
+          kbContext = "KNOWLEDGE BASE REFERENCES:\n" + chunks.map((c: any) => c.chunk_text).join("\n---\n");
         }
       }
     }
@@ -94,13 +96,12 @@ Rules:
 
 Current case ID: ${caseId}`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    // Call Ollama API (OpenAI-compatible endpoint)
+    const response = await fetch(`${OLLAMA_URL}/v1/chat/completions`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        model: OLLAMA_MODEL,
         messages: [
           { role: "system", content: systemPrompt },
           ...messages,
@@ -110,22 +111,22 @@ Current case ID: ${caseId}`;
     });
 
     if (!response.ok) {
-      if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again later." }), {
-          status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "AI usage limit reached. Please add credits." }), {
-          status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
       const t = await response.text();
-      console.error("AI gateway error:", response.status, t);
-      return new Response(JSON.stringify({ error: "AI service error" }), {
-        status: 500,
+      console.error("Ollama error:", response.status, t);
+
+      if (response.status === 404) {
+        return new Response(JSON.stringify({
+          error: `Model "${OLLAMA_MODEL}" not found. Run: ollama pull ${OLLAMA_MODEL}`,
+        }), {
+          status: 503,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify({
+        error: `Ollama error (${response.status}). Is Ollama running at ${OLLAMA_URL}?`,
+      }), {
+        status: 502,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -135,8 +136,17 @@ Current case ID: ${caseId}`;
     });
   } catch (e) {
     console.error("chat error:", e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
-      status: 500,
+
+    // Detect connection refused (Ollama not running)
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    const isConnectionError = msg.includes("Connection refused") || msg.includes("ECONNREFUSED") || msg.includes("NetworkError");
+
+    return new Response(JSON.stringify({
+      error: isConnectionError
+        ? `Cannot connect to Ollama at ${OLLAMA_URL}. Make sure Ollama is running: ollama serve`
+        : msg,
+    }), {
+      status: isConnectionError ? 503 : 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

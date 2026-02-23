@@ -88,11 +88,11 @@ export default function CDRVisualization({ caseId }: CDRVisualizationProps) {
 
     // Tower location scatter
     const towers = cdrRecords
-      .filter(r => r.lat && r.lng)
+      .filter(r => r.tower_lat && r.tower_lng)
       .map(r => ({
-        lat: r.lat,
-        lng: r.lng,
-        location: r.location || `${r.lat?.toFixed(4)}, ${r.lng?.toFixed(4)}`,
+        lat: r.tower_lat!,
+        lng: r.tower_lng!,
+        location: r.tower_location || `${r.tower_lat?.toFixed(4)}, ${r.tower_lng?.toFixed(4)}`,
         count: 1,
       }));
     // Aggregate by approximate location

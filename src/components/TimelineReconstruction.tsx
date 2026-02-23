@@ -41,8 +41,8 @@ export default function TimelineReconstruction({ caseId }: TimelineReconstructio
 
     const [cdrRes, ipdrRes, towerRes] = await Promise.all([
       supabase.from('cdr_records').select('*').eq('case_id', caseId).order('call_date', { ascending: true }).limit(2000),
-      supabase.from('ipdr_records').select('*').eq('case_id', caseId).order('timestamp', { ascending: true }).limit(1000),
-      supabase.from('tower_dump_records').select('*').eq('case_id', caseId).order('timestamp', { ascending: true }).limit(1000),
+      supabase.from('ipdr_records').select('*').eq('case_id', caseId).order('session_start', { ascending: true }).limit(1000),
+      supabase.from('tower_dump_records').select('*').eq('case_id', caseId).order('event_time', { ascending: true }).limit(1000),
     ]);
 
     const timeline: TimelineEvent[] = [];
@@ -56,9 +56,9 @@ export default function TimelineReconstruction({ caseId }: TimelineReconstructio
         type: 'call',
         title: `${r.call_type || 'Call'}: ${r.calling_number || '?'} → ${r.called_number || '?'}`,
         description: `Duration: ${r.duration ? `${Math.floor(r.duration / 60)}m ${r.duration % 60}s` : 'N/A'} | IMEI: ${r.imei || 'N/A'}`,
-        location: r.location || undefined,
-        lat: r.lat || undefined,
-        lng: r.lng || undefined,
+        location: r.tower_location || undefined,
+        lat: r.tower_lat || undefined,
+        lng: r.tower_lng || undefined,
         number: r.calling_number || r.called_number || undefined,
         metadata: { cell_id: r.cell_id, operator: r.operator, imei: r.imei },
       });
@@ -66,14 +66,14 @@ export default function TimelineReconstruction({ caseId }: TimelineReconstructio
 
     // IPDR events
     ipdrRes.data?.forEach(r => {
-      if (!r.timestamp) return;
+      if (!r.session_start) return;
       timeline.push({
         id: r.id,
-        timestamp: r.timestamp,
+        timestamp: r.session_start,
         type: 'data',
-        title: `Data Session: ${r.msisdn || r.ip_address || '?'}`,
-        description: `${r.bytes_transferred ? `${(r.bytes_transferred / 1024).toFixed(0)} KB` : ''} ${r.protocol || ''} → ${r.destination_ip || ''}:${r.destination_port || ''}`.trim(),
-        location: r.location || undefined,
+        title: `Data Session: ${r.msisdn || r.source_ip || '?'}`,
+        description: `${r.data_volume ? `${(r.data_volume / 1024).toFixed(0)} KB` : ''} ${r.protocol || ''} → ${r.destination_ip || ''}:${r.destination_port || ''}`.trim(),
+        location: r.tower_location || undefined,
         number: r.msisdn || undefined,
         metadata: { cell_id: r.cell_id, imei: r.imei },
       });
@@ -81,17 +81,17 @@ export default function TimelineReconstruction({ caseId }: TimelineReconstructio
 
     // Tower dump events
     towerRes.data?.forEach(r => {
-      if (!r.timestamp) return;
+      if (!r.event_time) return;
       timeline.push({
         id: r.id,
-        timestamp: r.timestamp,
+        timestamp: r.event_time,
         type: 'tower',
-        title: `Tower Activity: ${r.msisdn || r.imei || '?'}`,
+        title: `Tower Activity: ${r.mobile_number || r.imei || '?'}`,
         description: `Cell: ${r.cell_id || 'N/A'} | IMSI: ${r.imsi || 'N/A'}`,
-        location: r.location || undefined,
-        lat: r.lat || undefined,
-        lng: r.lng || undefined,
-        number: r.msisdn || undefined,
+        location: r.tower_location || undefined,
+        lat: r.tower_lat || undefined,
+        lng: r.tower_lng || undefined,
+        number: r.mobile_number || undefined,
         metadata: { cell_id: r.cell_id, imei: r.imei, imsi: r.imsi },
       });
     });

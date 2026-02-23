@@ -35,12 +35,9 @@ export default function CaseTrainingPanel({ caseId }: Props) {
 
   async function checkStatus() {
     setChecking(true);
-    const [last, { hash }] = await Promise.all([
-      getLastTrainingLog(caseId),
-      computeDataHash(caseId),
-    ]);
+    const last = await getLastTrainingLog(caseId);
     setLastLog(last);
-    setHasNewData(!last || last.data_snapshot_hash !== hash);
+    setHasNewData(!last);
     setChecking(false);
   }
 

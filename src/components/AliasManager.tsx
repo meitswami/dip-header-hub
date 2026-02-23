@@ -16,7 +16,7 @@ type Alias = {
   id: string;
   phone_number: string;
   alias_name: string;
-  confidence: number | null;
+  confidence: string | null;
   photo_url: string | null;
 };
 
@@ -152,7 +152,7 @@ export default function AliasManager({ caseId }: Props) {
                   <p className="text-xs text-muted-foreground font-mono">{alias.phone_number}</p>
                 </div>
                 {alias.confidence && (
-                  <span className="text-xs text-muted-foreground">{(alias.confidence * 100).toFixed(0)}%</span>
+                  <span className="text-xs text-muted-foreground">{alias.confidence}</span>
                 )}
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => deleteAlias(alias.id)}>
                   <Trash2 className="h-3.5 w-3.5" />

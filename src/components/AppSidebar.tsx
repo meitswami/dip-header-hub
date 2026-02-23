@@ -5,6 +5,7 @@ import {
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/hooks/useAuth';
 import { useLang } from '@/hooks/useLang';
+import { HealthIndicator } from '@/components/HealthIndicator';
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
   SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarFooter, SidebarHeader,
@@ -102,7 +103,8 @@ export function AppSidebar() {
         )}
       </SidebarContent>
 
-      <SidebarFooter className="p-4 border-t border-sidebar-border">
+      <SidebarFooter className="p-3 border-t border-sidebar-border space-y-2">
+        <HealthIndicator />
         <div className="flex items-center justify-between">
           <NavLink to="/profile" className="flex flex-col min-w-0 hover:opacity-80" activeClassName="">
             <span className="text-sm font-medium truncate">{profile?.full_name || 'Officer'}</span>

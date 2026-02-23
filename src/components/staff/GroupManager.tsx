@@ -5,12 +5,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { Group, Plus, Loader2, Pencil, Trash2, Users, UserPlus } from 'lucide-react';
+import { Group, Plus, Loader2, Pencil, Trash2, UserPlus, ToggleRight } from 'lucide-react';
 
 interface UserGroup {
   id: string;
@@ -25,6 +26,25 @@ interface Profile {
   full_name: string;
 }
 
+interface GroupModPerm {
+  group_id: string;
+  module_key: string;
+  enabled: boolean;
+}
+
+const MODULES = [
+  { key: 'cdr_analysis', label: 'CDR Analysis' },
+  { key: 'ipdr_analysis', label: 'IPDR Analysis' },
+  { key: 'tower_dump', label: 'Tower Dump' },
+  { key: 'ai_chat', label: 'AI Chat' },
+  { key: 'reports', label: 'Reports' },
+  { key: 'documents', label: 'Documents' },
+  { key: 'knowledge_base', label: 'Knowledge Base' },
+  { key: 'legal_reference', label: 'Legal Reference' },
+  { key: 'case_compare', label: 'Case Compare' },
+  { key: 'data_upload', label: 'Data Upload' },
+];
+
 export default function GroupManager() {
   const { toast } = useToast();
   const [groups, setGroups] = useState<UserGroup[]>([]);
@@ -33,9 +53,11 @@ export default function GroupManager() {
   const [editGroup, setEditGroup] = useState<UserGroup | null>(null);
   const [deleteGroup, setDeleteGroup] = useState<UserGroup | null>(null);
   const [membersGroup, setMembersGroup] = useState<UserGroup | null>(null);
+  const [permsGroup, setPermsGroup] = useState<UserGroup | null>(null);
   const [form, setForm] = useState({ name: '', description: '' });
   const [allUsers, setAllUsers] = useState<Profile[]>([]);
   const [groupMembers, setGroupMembers] = useState<string[]>([]);
+  const [groupPerms, setGroupPerms] = useState<GroupModPerm[]>([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => { loadGroups(); }, []);
@@ -99,6 +121,41 @@ export default function GroupManager() {
     loadGroups();
   }
 
+  async function openPerms(g: UserGroup) {
+    setPermsGroup(g);
+    const { data } = await supabase.from('group_module_permissions').select('group_id, module_key, enabled').eq('group_id', g.id);
+    setGroupPerms(data || []);
+  }
+
+  function isModuleEnabled(moduleKey: string) {
+    const p = groupPerms.find(x => x.module_key === moduleKey);
+    return p ? p.enabled : true; // default enabled
+  }
+
+  async function toggleModulePerm(moduleKey: string) {
+    if (!permsGroup) return;
+    const newVal = !isModuleEnabled(moduleKey);
+
+    // Optimistic update
+    setGroupPerms(prev => {
+      const exists = prev.find(x => x.module_key === moduleKey);
+      if (exists) return prev.map(x => x.module_key === moduleKey ? { ...x, enabled: newVal } : x);
+      return [...prev, { group_id: permsGroup.id, module_key: moduleKey, enabled: newVal }];
+    });
+
+    const { error } = await supabase.from('group_module_permissions').upsert(
+      { group_id: permsGroup.id, module_key: moduleKey, enabled: newVal, updated_at: new Date().toISOString() },
+      { onConflict: 'group_id,module_key' }
+    );
+
+    if (error) {
+      toast({ title: 'Failed to update', description: error.message, variant: 'destructive' });
+      openPerms(permsGroup);
+    } else {
+      toast({ title: `${moduleKey.replace(/_/g, ' ')} ${newVal ? 'enabled' : 'disabled'} for ${permsGroup.name}` });
+    }
+  }
+
   function openEdit(g: UserGroup) {
     setEditGroup(g);
     setForm({ name: g.name, description: g.description || '' });
@@ -107,7 +164,7 @@ export default function GroupManager() {
   return (
     <>
       <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-muted-foreground">Create user groups and assign members for bulk permissions</p>
+        <p className="text-sm text-muted-foreground">Create user groups, assign members, and manage group-level module access</p>
         <Button onClick={() => { setAddOpen(true); setForm({ name: '', description: '' }); }}>
           <Plus className="h-4 w-4 mr-2" />
           Create Group
@@ -146,6 +203,7 @@ export default function GroupManager() {
                     <TableCell className="text-sm text-muted-foreground">{new Date(g.created_at).toLocaleDateString()}</TableCell>
                     <TableCell className="text-right space-x-1">
                       <Button variant="ghost" size="icon" onClick={() => openMembers(g)} title="Manage members"><UserPlus className="h-4 w-4" /></Button>
+                      <Button variant="ghost" size="icon" onClick={() => openPerms(g)} title="Module permissions"><ToggleRight className="h-4 w-4" /></Button>
                       <Button variant="ghost" size="icon" onClick={() => openEdit(g)} title="Edit"><Pencil className="h-4 w-4" /></Button>
                       <Button variant="ghost" size="icon" onClick={() => setDeleteGroup(g)} className="text-destructive hover:text-destructive" title="Delete"><Trash2 className="h-4 w-4" /></Button>
                     </TableCell>
@@ -193,6 +251,32 @@ export default function GroupManager() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setMembersGroup(null)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Group Module Permissions Dialog */}
+      <Dialog open={!!permsGroup} onOpenChange={open => !open && setPermsGroup(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Module Permissions — {permsGroup?.name}</DialogTitle>
+            <DialogDescription>
+              Enable or disable modules for this group. Group permissions can override role-level denials — if a module is disabled for a role but enabled for a group, members of that group will still have access.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {MODULES.map(mod => (
+              <div key={mod.key} className="flex items-center justify-between p-2 rounded-md hover:bg-muted/50">
+                <span className="text-sm font-medium">{mod.label}</span>
+                <Switch
+                  checked={isModuleEnabled(mod.key)}
+                  onCheckedChange={() => toggleModulePerm(mod.key)}
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPermsGroup(null)}>Done</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

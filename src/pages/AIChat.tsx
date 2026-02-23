@@ -113,14 +113,14 @@ export default function AIChat() {
     setHistoryLoading(true);
     supabase
       .from('chat_logs')
-      .select('message, role, created_at')
+      .select('content, role, created_at')
       .eq('case_id', selectedCase)
       .order('created_at', { ascending: true })
       .then(({ data }) => {
         if (data?.length) {
-          setMessages(data.map(d => ({
+          setMessages(data.map((d: any) => ({
             role: d.role as 'user' | 'assistant',
-            content: d.message,
+            content: d.content,
             timestamp: new Date(d.created_at),
           })));
         } else {
@@ -220,9 +220,9 @@ export default function AIChat() {
 
       if (user && assistantSoFar) {
         await supabase.from('chat_logs').insert([
-          { case_id: selectedCase, user_id: user.id, message: userMsg.content, role: 'user' },
-          { case_id: selectedCase, user_id: user.id, message: assistantSoFar, role: 'assistant' },
-        ]);
+          { case_id: selectedCase, user_id: user.id, content: userMsg.content, role: 'user' },
+          { case_id: selectedCase, user_id: user.id, content: assistantSoFar, role: 'assistant' },
+        ] as any);
       }
     } catch (err: any) {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Error: ' + (err.message || 'Failed to get response'), timestamp: new Date() }]);

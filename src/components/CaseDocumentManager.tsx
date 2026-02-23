@@ -33,14 +33,11 @@ type CaseDoc = {
   id: string;
   case_id: string;
   title: string;
-  file_name: string;
-  file_url: string;
+  file_path: string;
+  file_type: string | null;
   file_size: number | null;
-  category: string;
-  file_hash: string | null;
+  uploaded_by: string | null;
   created_at: string;
-  ocr_text: string | null;
-  ocr_status: string | null;
 };
 
 interface Props {
@@ -68,14 +65,13 @@ export default function CaseDocumentManager({ caseId }: Props) {
       .select('*')
       .eq('case_id', caseId)
       .order('created_at', { ascending: false });
-    if (data) setDocuments(data as CaseDoc[]);
+    if (data) setDocuments(data as unknown as CaseDoc[]);
     setLoading(false);
   }
 
   async function checkDuplicate(fileName: string, title: string): Promise<boolean> {
     const existing = documents.find(
-      d => d.file_name.toLowerCase() === fileName.toLowerCase() ||
-           d.title.toLowerCase() === title.toLowerCase()
+      d => d.title.toLowerCase() === title.toLowerCase()
     );
     if (existing) {
       toast({
@@ -122,23 +118,17 @@ export default function CaseDocumentManager({ caseId }: Props) {
       const { data: insertData, error: insertErr } = await supabase.from('case_documents').insert({
         case_id: caseId,
         title: docTitle.trim(),
-        file_name: file.name,
-        file_url: filePath,
+        file_path: filePath,
         file_size: file.size,
-        category,
-        file_hash: fileHash,
+        file_type: file.type || ext || null,
         uploaded_by: user.id,
-        ocr_status: 'pending',
-      }).select().single();
+      } as any).select().single();
 
       if (insertErr) throw insertErr;
 
-      toast({ title: 'Document uploaded', description: `${docTitle.trim()} — starting OCR...` });
+      toast({ title: 'Document uploaded', description: docTitle.trim() });
       setDocTitle('');
       loadDocuments();
-
-      // Trigger OCR
-      if (insertData) triggerOCR(insertData.id);
     } catch (err: any) {
       toast({ title: 'Upload failed', description: err.message, variant: 'destructive' });
     }
@@ -175,37 +165,22 @@ export default function CaseDocumentManager({ caseId }: Props) {
 
   async function deleteDoc(doc: CaseDoc) {
     if (!confirm(`Delete "${doc.title}"?`)) return;
-    await supabase.storage.from('case-documents').remove([doc.file_url]);
+    await supabase.storage.from('case-documents').remove([doc.file_path]);
     await supabase.from('case_documents').delete().eq('id', doc.id);
     toast({ title: 'Document deleted' });
     loadDocuments();
   }
 
   const filtered = documents.filter(d => {
-    if (filterCategory !== 'all' && d.category !== filterCategory) return false;
-    if (search && !d.title.toLowerCase().includes(search.toLowerCase()) && !d.file_name.toLowerCase().includes(search.toLowerCase())) return false;
+    if (search && !d.title.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
-
-  const categoryCounts = documents.reduce((acc, d) => {
-    acc[d.category] = (acc[d.category] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
 
   const fileIcon = (name: string) => {
     const ext = name.split('.').pop()?.toLowerCase();
     if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext || '')) return <FileImage className="h-4 w-4" />;
     if (['pdf'].includes(ext || '')) return <FileType className="h-4 w-4" />;
     return <File className="h-4 w-4" />;
-  };
-
-  const ocrStatusBadge = (status: string | null) => {
-    switch (status) {
-      case 'completed': return <Badge variant="outline" className="text-xs bg-success/10 text-success border-success/30">OCR Done</Badge>;
-      case 'processing': return <Badge variant="outline" className="text-xs bg-warning/10 text-warning border-warning/30">Processing...</Badge>;
-      case 'error': return <Badge variant="outline" className="text-xs bg-destructive/10 text-destructive border-destructive/30">OCR Error</Badge>;
-      default: return <Badge variant="outline" className="text-xs">Pending</Badge>;
-    }
   };
 
   return (
@@ -223,64 +198,22 @@ export default function CaseDocumentManager({ caseId }: Props) {
         <CollapsibleContent>
         <CardContent className="space-y-4">
         {/* Upload form */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
           <div>
             <label className="text-xs font-medium mb-1 block">Document Name *</label>
-            <Input
-              placeholder="e.g. Chargesheet"
-              value={docTitle}
-              onChange={e => setDocTitle(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium mb-1 block">Category</label>
-            <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {DOC_CATEGORIES.map(c => (
-                  <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Input placeholder="e.g. Chargesheet" value={docTitle} onChange={e => setDocTitle(e.target.value)} />
           </div>
           <div className="md:col-span-2">
             <label className="text-xs font-medium mb-1 block">Upload (.pdf, .txt, .png, .jpg, .jpeg)</label>
             <div className="relative">
-              <input
-                type="file"
-                accept=".pdf,.txt,.png,.jpg,.jpeg"
-                onChange={handleUpload}
-                disabled={uploading || !docTitle.trim()}
-                className="absolute inset-0 opacity-0 cursor-pointer"
-              />
+              <input type="file" accept=".pdf,.txt,.png,.jpg,.jpeg" onChange={handleUpload} disabled={uploading || !docTitle.trim()} className="absolute inset-0 opacity-0 cursor-pointer" />
               <Button variant="outline" disabled={uploading || !docTitle.trim()} className="w-full">
                 {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-                {uploading ? 'Uploading & Processing...' : 'Choose File'}
+                {uploading ? 'Uploading...' : 'Choose File'}
               </Button>
             </div>
           </div>
         </div>
-
-        {/* Filter badges */}
-        {Object.keys(categoryCounts).length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            <Badge
-              variant={filterCategory === 'all' ? 'default' : 'outline'}
-              className="cursor-pointer text-xs"
-              onClick={() => setFilterCategory('all')}
-            >All ({documents.length})</Badge>
-            {Object.entries(categoryCounts).map(([cat, count]) => (
-              <Badge
-                key={cat}
-                variant={filterCategory === cat ? 'default' : 'outline'}
-                className="cursor-pointer text-xs"
-                onClick={() => setFilterCategory(cat)}
-              >
-                {DOC_CATEGORIES.find(c => c.value === cat)?.label || cat} ({count})
-              </Badge>
-            ))}
-          </div>
-        )}
 
         {/* Search */}
         {documents.length > 0 && (
@@ -302,31 +235,14 @@ export default function CaseDocumentManager({ caseId }: Props) {
           <div className="space-y-2">
             {filtered.map(doc => (
               <div key={doc.id} className="flex items-center gap-3 p-3 rounded-lg border border-border">
-                <div className="text-muted-foreground">{fileIcon(doc.file_name)}</div>
+                <div className="text-muted-foreground">{fileIcon(doc.title)}</div>
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-sm truncate">{doc.title}</p>
                   <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-                    <span>{doc.file_name}</span>
-                    {doc.file_size && <span>• {(doc.file_size / 1024).toFixed(0)} KB</span>}
+                    {doc.file_size && <span>{(doc.file_size / 1024).toFixed(0)} KB</span>}
                     <span>• {new Date(doc.created_at).toLocaleDateString()}</span>
                   </div>
                 </div>
-                <Badge variant="outline" className="text-xs">
-                  {DOC_CATEGORIES.find(c => c.value === doc.category)?.label || doc.category}
-                </Badge>
-                {ocrStatusBadge(doc.ocr_status)}
-                {doc.ocr_text && (
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setViewingDoc(doc)}>
-                    <Eye className="h-3.5 w-3.5" />
-                  </Button>
-                )}
-                {ocrProcessing.has(doc.id) ? (
-                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                ) : doc.ocr_status !== 'completed' && (
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => triggerOCR(doc.id)} title="Run OCR">
-                    <ScanText className="h-3.5 w-3.5" />
-                  </Button>
-                )}
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => deleteDoc(doc)}>
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
@@ -334,18 +250,6 @@ export default function CaseDocumentManager({ caseId }: Props) {
             ))}
           </div>
         )}
-
-        {/* OCR Text Viewer Dialog */}
-        <Dialog open={!!viewingDoc} onOpenChange={() => setViewingDoc(null)}>
-          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>{viewingDoc?.title} — Extracted Text</DialogTitle>
-            </DialogHeader>
-            <div className="whitespace-pre-wrap text-sm font-mono bg-muted p-4 rounded-lg">
-              {viewingDoc?.ocr_text || 'No text extracted.'}
-            </div>
-          </DialogContent>
-        </Dialog>
       </CardContent>
       </CollapsibleContent>
       </Collapsible>

@@ -135,7 +135,7 @@ export async function buildCaseProfile(caseId: string): Promise<CaseProfile> {
     aliases: aliasRes.data || [],
     persons: personRes.data || [],
     insights: insRes.data || [],
-    documentTitles: (docsRes.data || []).map(d => `${d.title} (${d.category})`),
+    documentTitles: (docsRes.data || []).map((d: any) => d.title),
   };
 }
 
@@ -143,7 +143,7 @@ export async function trainCase(caseId: string, userId: string): Promise<{ alrea
   const { hash, counts } = await computeDataHash(caseId);
   const lastLog = await getLastTrainingLog(caseId);
 
-  if (lastLog && lastLog.data_snapshot_hash === hash) {
+  if (lastLog && (lastLog as any).training_data && (lastLog as any).training_data === hash) {
     return { alreadyTrained: true, log: lastLog };
   }
 
@@ -166,7 +166,8 @@ export async function trainCase(caseId: string, userId: string): Promise<{ alrea
 
   // What's new since last training
   if (lastLog) {
-    const oldCounts = (lastLog.data_counts || {}) as Record<string, number>;
+    const oldData = (lastLog as any).training_data || {};
+    const oldCounts = (typeof oldData === 'object' ? oldData : {}) as Record<string, number>;
     const newItems: string[] = [];
     Object.entries(counts).forEach(([key, val]) => {
       const old = (oldCounts as any)[key] || 0;

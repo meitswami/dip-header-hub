@@ -30,20 +30,7 @@ const CATEGORIES = [
   { value: 'general', label: 'General Reference' },
 ];
 
-type KBDoc = {
-  id: string;
-  title: string;
-  file_name: string;
-  file_size: number | null;
-  category: string;
-  status: string;
-  processing_started_at: string | null;
-  processing_completed_at: string | null;
-  chunk_count: number | null;
-  page_count: number | null;
-  error_message: string | null;
-  created_at: string;
-};
+type KBDoc = any;
 
 type QAMessage = { role: 'user' | 'assistant'; content: string };
 

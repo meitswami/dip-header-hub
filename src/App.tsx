@@ -4,8 +4,9 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
-import { ThemeProvider } from "@/hooks/useTheme";
 import { AppLayout } from "@/components/AppLayout";
+import { Loader2 } from "lucide-react";
+
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Cases from "./pages/Cases";
@@ -15,25 +16,48 @@ import CaseRecords from "./pages/CaseRecords";
 import DataUpload from "./pages/DataUpload";
 import AIChat from "./pages/AIChat";
 import Reports from "./pages/Reports";
-import LegalReference from "./pages/LegalReference";
-import KnowledgeBase from "./pages/KnowledgeBase";
 import CaseDocuments from "./pages/CaseDocuments";
-import AdminUsers from "./pages/AdminUsers";
-import ProfileSettings from "./pages/ProfileSettings";
+import KnowledgeBase from "./pages/KnowledgeBase";
+import LegalReference from "./pages/LegalReference";
 import CaseComparison from "./pages/CaseComparison";
+import AdminUsers from "./pages/AdminUsers";
 import DataCleanup from "./pages/DataCleanup";
 import DataExport from "./pages/DataExport";
+import ProfileSettings from "./pages/ProfileSettings";
 import NotFound from "./pages/NotFound";
 
-import { Loader2 } from "lucide-react";
+const queryClient = new QueryClient();
 
-const queryClient = new QueryClient(); // init
-
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
-  if (loading) return <div className="flex min-h-screen items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+  if (loading) return <div className="flex min-h-screen items-center justify-center bg-background"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   if (!user) return <Navigate to="/login" replace />;
   return <AppLayout>{children}</AppLayout>;
+}
+
+function AppRoutes() {
+  return (
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route path="/" element={<RequireAuth><Dashboard /></RequireAuth>} />
+      <Route path="/cases" element={<RequireAuth><Cases /></RequireAuth>} />
+      <Route path="/cases/new" element={<RequireAuth><NewCase /></RequireAuth>} />
+      <Route path="/cases/:id" element={<RequireAuth><CaseDetail /></RequireAuth>} />
+      <Route path="/cases/:id/records" element={<RequireAuth><CaseRecords /></RequireAuth>} />
+      <Route path="/upload" element={<RequireAuth><DataUpload /></RequireAuth>} />
+      <Route path="/chat" element={<RequireAuth><AIChat /></RequireAuth>} />
+      <Route path="/reports" element={<RequireAuth><Reports /></RequireAuth>} />
+      <Route path="/documents" element={<RequireAuth><CaseDocuments /></RequireAuth>} />
+      <Route path="/knowledge-base" element={<RequireAuth><KnowledgeBase /></RequireAuth>} />
+      <Route path="/legal" element={<RequireAuth><LegalReference /></RequireAuth>} />
+      <Route path="/compare" element={<RequireAuth><CaseComparison /></RequireAuth>} />
+      <Route path="/admin/users" element={<RequireAuth><AdminUsers /></RequireAuth>} />
+      <Route path="/admin/cleanup" element={<RequireAuth><DataCleanup /></RequireAuth>} />
+      <Route path="/admin/export" element={<RequireAuth><DataExport /></RequireAuth>} />
+      <Route path="/profile" element={<RequireAuth><ProfileSettings /></RequireAuth>} />
+      <Route path="*" element={<NotFound />} />
+    </Routes>
+  );
 }
 
 const App = () => (
@@ -42,30 +66,9 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <ThemeProvider>
-          <AuthProvider>
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-              <Route path="/cases" element={<ProtectedRoute><Cases /></ProtectedRoute>} />
-              <Route path="/cases/new" element={<ProtectedRoute><NewCase /></ProtectedRoute>} />
-              <Route path="/cases/:id" element={<ProtectedRoute><CaseDetail /></ProtectedRoute>} />
-              <Route path="/cases/:id/records" element={<ProtectedRoute><CaseRecords /></ProtectedRoute>} />
-              <Route path="/upload" element={<ProtectedRoute><DataUpload /></ProtectedRoute>} />
-              <Route path="/chat" element={<ProtectedRoute><AIChat /></ProtectedRoute>} />
-              <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
-              <Route path="/legal" element={<ProtectedRoute><LegalReference /></ProtectedRoute>} />
-              <Route path="/knowledge-base" element={<ProtectedRoute><KnowledgeBase /></ProtectedRoute>} />
-              <Route path="/documents" element={<ProtectedRoute><CaseDocuments /></ProtectedRoute>} />
-              <Route path="/compare" element={<ProtectedRoute><CaseComparison /></ProtectedRoute>} />
-              <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
-              <Route path="/admin/cleanup" element={<ProtectedRoute><DataCleanup /></ProtectedRoute>} />
-              <Route path="/admin/export" element={<ProtectedRoute><DataExport /></ProtectedRoute>} />
-              <Route path="/profile" element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </AuthProvider>
-        </ThemeProvider>
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

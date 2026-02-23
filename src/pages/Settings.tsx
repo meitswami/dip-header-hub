@@ -6,8 +6,18 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
-import { Loader2, Save, Bot, Database, HardDrive, RefreshCw, CheckCircle2, XCircle, Wifi } from 'lucide-react';
+import { Loader2, Save, Bot, Database, HardDrive, RefreshCw, CheckCircle2, XCircle, Wifi, Cpu, MemoryStick } from 'lucide-react';
+
+const RECOMMENDED_MODELS = [
+  { value: 'phi3:mini', label: 'Phi-3 Mini (3.8B)', ram: '8 GB', accuracy: '⭐⭐⭐', speed: 'Fast', desc: 'Best for 8GB RAM. Good for basic queries.' },
+  { value: 'gemma:2b', label: 'Gemma 2B', ram: '8 GB', accuracy: '⭐⭐', speed: 'Very Fast', desc: 'Fastest option, lower accuracy.' },
+  { value: 'mistral:7b', label: 'Mistral 7B', ram: '12 GB', accuracy: '⭐⭐⭐⭐', speed: 'Medium', desc: 'Strong reasoning, good for CDR analysis.' },
+  { value: 'llama3:8b', label: 'Llama 3 8B', ram: '16 GB', accuracy: '⭐⭐⭐⭐⭐', speed: 'Medium', desc: 'Best accuracy for forensic analysis.' },
+  { value: 'mixtral:8x7b', label: 'Mixtral 8x7B', ram: '24 GB+', accuracy: '⭐⭐⭐⭐⭐', speed: 'Slow', desc: 'Top-tier reasoning, needs high RAM.' },
+  { value: 'llava:7b', label: 'LLaVA 7B (Vision)', ram: '16 GB', accuracy: '⭐⭐⭐⭐', speed: 'Medium', desc: 'For OCR/image analysis only.' },
+];
 
 function StatusBadge({ status }: { status: ServiceStatus }) {
   if (status === 'ok') return <Badge className="bg-success text-success-foreground gap-1"><CheckCircle2 className="h-3 w-3" /> Connected</Badge>;
@@ -66,6 +76,8 @@ export default function Settings() {
     setTestResult(null);
   }
 
+  const selectedModelInfo = RECOMMENDED_MODELS.find(m => m.value === model);
+
   return (
     <div className="space-y-6 max-w-2xl">
       <div>
@@ -117,11 +129,44 @@ export default function Settings() {
               <Input id="ollamaUrl" value={url} onChange={e => setUrl(e.target.value)} placeholder="http://localhost:11434" className="font-mono text-sm" />
               <p className="mt-1 text-xs text-muted-foreground">Default: http://localhost:11434 — Change if Ollama runs on another machine</p>
             </div>
+
+            <div>
+              <Label>Recommended Model</Label>
+              <Select value={RECOMMENDED_MODELS.some(m => m.value === model) ? model : 'custom'} onValueChange={v => { if (v !== 'custom') setModel(v); }}>
+                <SelectTrigger className="bg-background">
+                  <SelectValue placeholder="Select a model..." />
+                </SelectTrigger>
+                <SelectContent className="bg-popover z-50">
+                  {RECOMMENDED_MODELS.map(m => (
+                    <SelectItem key={m.value} value={m.value}>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{m.label}</span>
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">{m.ram}</Badge>
+                      </div>
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="custom">Custom model...</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* Model details card */}
+              {selectedModelInfo && (
+                <div className="mt-2 rounded-lg border border-border bg-muted/50 p-3 text-sm space-y-1">
+                  <div className="flex items-center gap-4 text-xs">
+                    <span className="flex items-center gap-1"><MemoryStick className="h-3 w-3" /> RAM: {selectedModelInfo.ram}</span>
+                    <span>Accuracy: {selectedModelInfo.accuracy}</span>
+                    <span className="flex items-center gap-1"><Cpu className="h-3 w-3" /> Speed: {selectedModelInfo.speed}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{selectedModelInfo.desc}</p>
+                </div>
+              )}
+            </div>
+
             <div>
               <Label htmlFor="ollamaModel">Model Name</Label>
               <Input id="ollamaModel" value={model} onChange={e => setModel(e.target.value)} placeholder="phi3:mini" className="font-mono text-sm" />
               <p className="mt-1 text-xs text-muted-foreground">
-                Recommended for 8GB RAM: <code className="font-mono text-xs bg-muted px-1 rounded">phi3:mini</code> or <code className="font-mono text-xs bg-muted px-1 rounded">gemma:2b</code>
+                Type any Ollama model name or select from recommendations above. Install: <code className="font-mono text-xs bg-muted px-1 rounded">ollama pull {model}</code>
               </p>
             </div>
           </div>

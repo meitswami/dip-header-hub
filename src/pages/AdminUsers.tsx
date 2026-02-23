@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { Users, Loader2, Pencil, Trash2, Plus, Search, ShieldCheck } from 'lucide-react';
+import { Users, Loader2, Pencil, Trash2, Search, ShieldCheck, Plus } from 'lucide-react';
 import { Navigate } from 'react-router-dom';
 
 interface UserProfile {
@@ -39,6 +39,8 @@ export default function AdminUsers() {
   const [search, setSearch] = useState('');
   const [editUser, setEditUser] = useState<UserProfile | null>(null);
   const [deleteUser, setDeleteUser] = useState<UserProfile | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState({ full_name: '', badge_number: '', department: '', rank: '', designation: '', phone: '', role: 'viewer' });
   const [editForm, setEditForm] = useState({ full_name: '', badge_number: '', department: '', rank: '', designation: '', phone: '', role: '' });
 
   useEffect(() => {
@@ -105,13 +107,10 @@ export default function AdminUsers() {
         designation: editForm.designation || null,
         phone: editForm.phone || null,
       }).eq('id', editUser.id);
-
       if (error) throw error;
-
       if (editForm.role !== editUser.role) {
         await updateRole(editUser.id, editForm.role);
       }
-
       toast({ title: 'User updated successfully' });
       setEditUser(null);
       loadUsers();
@@ -123,7 +122,6 @@ export default function AdminUsers() {
   async function confirmDelete() {
     if (!deleteUser) return;
     try {
-      // Remove role first, then profile
       await supabase.from('user_roles').delete().eq('user_id', deleteUser.id);
       const { error } = await supabase.from('profiles').delete().eq('id', deleteUser.id);
       if (error) throw error;
@@ -135,8 +133,21 @@ export default function AdminUsers() {
     }
   }
 
+  async function handleAdd() {
+    if (!addForm.full_name.trim()) {
+      toast({ title: 'Name is required', variant: 'destructive' });
+      return;
+    }
+    toast({
+      title: 'New users must register first',
+      description: 'Ask them to sign up, then you can assign their role and edit their profile here.',
+    });
+    setAddOpen(false);
+    setAddForm({ full_name: '', badge_number: '', department: '', rank: '', designation: '', phone: '', role: 'viewer' });
+  }
+
   const filtered = users.filter(u =>
-    !search || [u.full_name, u.badge_number, u.department, u.role].some(v => v?.toLowerCase().includes(search.toLowerCase()))
+    !search || [u.full_name, u.badge_number, u.department, u.role, u.rank].some(v => v?.toLowerCase().includes(search.toLowerCase()))
   );
 
   const roleBadge = (r: string) => {
@@ -156,21 +167,22 @@ export default function AdminUsers() {
           </h1>
           <p className="text-sm text-muted-foreground mt-1">Manage users, assign roles, and edit profiles</p>
         </div>
+        <Button onClick={() => setAddOpen(true)}>
+          <Plus className="h-4 w-4 mr-2" />
+          Add User
+        </Button>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {ROLES.map(r => {
-          const count = users.filter(u => u.role === r.value).length;
-          return (
-            <Card key={r.value}>
-              <CardContent className="pt-4 pb-3 px-4">
-                <div className="text-2xl font-bold">{count}</div>
-                <div className="text-xs text-muted-foreground">{r.label}s</div>
-              </CardContent>
-            </Card>
-          );
-        })}
+        {ROLES.map(r => (
+          <Card key={r.value}>
+            <CardContent className="pt-4 pb-3 px-4">
+              <div className="text-2xl font-bold">{users.filter(u => u.role === r.value).length}</div>
+              <div className="text-xs text-muted-foreground">{r.label}s</div>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
       {/* User Table */}
@@ -180,12 +192,7 @@ export default function AdminUsers() {
             <CardTitle className="text-lg">All Users</CardTitle>
             <div className="relative w-64">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search users..."
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                className="pl-9"
-              />
+              <Input placeholder="Search users..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
             </div>
           </div>
         </CardHeader>
@@ -194,8 +201,7 @@ export default function AdminUsers() {
             <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></div>
           ) : filtered.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
-              <Users className="h-10 w-10 mx-auto mb-2 opacity-40" />
-              <p>No users found</p>
+              <Users className="h-10 w-10 mx-auto mb-2 opacity-40" /><p>No users found</p>
             </div>
           ) : (
             <Table>
@@ -220,20 +226,14 @@ export default function AdminUsers() {
                       <Select value={u.role} onValueChange={val => updateRole(u.id, val)}>
                         <SelectTrigger className="w-36">{roleBadge(u.role)}</SelectTrigger>
                         <SelectContent>
-                          {ROLES.map(r => (
-                            <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
-                          ))}
+                          {ROLES.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     </TableCell>
                     <TableCell className="text-right space-x-1">
-                      <Button variant="ghost" size="icon" onClick={() => openEdit(u)} title="Edit user">
-                        <Pencil className="h-4 w-4" />
-                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => openEdit(u)} title="Edit"><Pencil className="h-4 w-4" /></Button>
                       {u.id !== user?.id && (
-                        <Button variant="ghost" size="icon" onClick={() => setDeleteUser(u)} title="Remove user" className="text-destructive hover:text-destructive">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => setDeleteUser(u)} className="text-destructive hover:text-destructive" title="Remove"><Trash2 className="h-4 w-4" /></Button>
                       )}
                     </TableCell>
                   </TableRow>
@@ -243,6 +243,49 @@ export default function AdminUsers() {
           )}
         </CardContent>
       </Card>
+
+      {/* Add User Dialog */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add New User</DialogTitle>
+            <DialogDescription>New users must first sign up/register. You can then assign their role and edit their profile here.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label>Full Name *</Label>
+              <Input value={addForm.full_name} onChange={e => setAddForm(f => ({ ...f, full_name: e.target.value }))} placeholder="Enter full name" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Badge Number</Label>
+                <Input value={addForm.badge_number} onChange={e => setAddForm(f => ({ ...f, badge_number: e.target.value }))} />
+              </div>
+              <div className="grid gap-2">
+                <Label>Phone</Label>
+                <Input value={addForm.phone} onChange={e => setAddForm(f => ({ ...f, phone: e.target.value }))} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Department</Label>
+                <Input value={addForm.department} onChange={e => setAddForm(f => ({ ...f, department: e.target.value }))} />
+              </div>
+              <div className="grid gap-2">
+                <Label>Initial Role</Label>
+                <Select value={addForm.role} onValueChange={val => setAddForm(f => ({ ...f, role: val }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>{ROLES.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
+            <Button onClick={handleAdd}>Add User</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Dialog */}
       <Dialog open={!!editUser} onOpenChange={open => !open && setEditUser(null)}>
@@ -257,38 +300,19 @@ export default function AdminUsers() {
               <Input value={editForm.full_name} onChange={e => setEditForm(f => ({ ...f, full_name: e.target.value }))} />
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label>Badge Number</Label>
-                <Input value={editForm.badge_number} onChange={e => setEditForm(f => ({ ...f, badge_number: e.target.value }))} />
-              </div>
-              <div className="grid gap-2">
-                <Label>Phone</Label>
-                <Input value={editForm.phone} onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))} />
-              </div>
+              <div className="grid gap-2"><Label>Badge Number</Label><Input value={editForm.badge_number} onChange={e => setEditForm(f => ({ ...f, badge_number: e.target.value }))} /></div>
+              <div className="grid gap-2"><Label>Phone</Label><Input value={editForm.phone} onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))} /></div>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label>Department</Label>
-                <Input value={editForm.department} onChange={e => setEditForm(f => ({ ...f, department: e.target.value }))} />
-              </div>
-              <div className="grid gap-2">
-                <Label>Rank</Label>
-                <Input value={editForm.rank} onChange={e => setEditForm(f => ({ ...f, rank: e.target.value }))} />
-              </div>
+              <div className="grid gap-2"><Label>Department</Label><Input value={editForm.department} onChange={e => setEditForm(f => ({ ...f, department: e.target.value }))} /></div>
+              <div className="grid gap-2"><Label>Rank</Label><Input value={editForm.rank} onChange={e => setEditForm(f => ({ ...f, rank: e.target.value }))} /></div>
             </div>
-            <div className="grid gap-2">
-              <Label>Designation</Label>
-              <Input value={editForm.designation} onChange={e => setEditForm(f => ({ ...f, designation: e.target.value }))} />
-            </div>
+            <div className="grid gap-2"><Label>Designation</Label><Input value={editForm.designation} onChange={e => setEditForm(f => ({ ...f, designation: e.target.value }))} /></div>
             <div className="grid gap-2">
               <Label>Role</Label>
               <Select value={editForm.role} onValueChange={val => setEditForm(f => ({ ...f, role: val }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {ROLES.map(r => (
-                    <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
-                  ))}
-                </SelectContent>
+                <SelectContent>{ROLES.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}</SelectContent>
               </Select>
             </div>
           </div>
@@ -304,9 +328,7 @@ export default function AdminUsers() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Remove User</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to remove <strong>{deleteUser?.full_name}</strong>'s profile and role? This action cannot be undone.
-            </DialogDescription>
+            <DialogDescription>Are you sure you want to remove <strong>{deleteUser?.full_name}</strong>? This cannot be undone.</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteUser(null)}>Cancel</Button>

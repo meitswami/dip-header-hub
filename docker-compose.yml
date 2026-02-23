@@ -1,0 +1,87 @@
+# ===========================================
+# DIP — Digital Investigation Platform
+# Single-command local development setup
+# ===========================================
+#
+# Usage:
+#   docker compose up          # Start everything
+#   docker compose up -d       # Start in background
+#   docker compose down        # Stop (preserves data)
+#   docker compose down -v     # Stop and delete all data
+#
+# Prerequisites:
+#   - Docker Desktop running
+#   - No other services on ports 5173, 54321-54324
+#
+# This wraps:
+#   1. Supabase stack (PostgreSQL, Auth, Storage, PostgREST, Realtime)
+#   2. Vite dev server (React frontend)
+
+version: "3.8"
+
+services:
+  # ── Supabase Local Stack ──────────────────────────────
+  # Managed by Supabase CLI inside a container
+  supabase:
+    image: supabase/studio:latest
+    container_name: dip-supabase
+    restart: unless-stopped
+    ports:
+      - "54323:3000"    # Studio UI
+    environment:
+      SUPABASE_URL: http://supabase-kong:8000
+      STUDIO_PG_META_URL: http://supabase-pg-meta:8080
+    depends_on:
+      - supabase-db
+    networks:
+      - dip-network
+
+  supabase-db:
+    image: supabase/postgres:15.6.1.143
+    container_name: dip-postgres
+    restart: unless-stopped
+    ports:
+      - "54322:5432"
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - supabase-db-data:/var/lib/postgresql/data
+      - ./supabase/migrations:/docker-entrypoint-initdb.d/migrations
+      - ./supabase/seed.sql:/docker-entrypoint-initdb.d/seed.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - dip-network
+
+  # ── Vite Dev Server ───────────────────────────────────
+  app:
+    image: node:20-alpine
+    container_name: dip-app
+    working_dir: /app
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+    environment:
+      - VITE_SUPABASE_URL=http://localhost:54321
+      - VITE_SUPABASE_PUBLISHABLE_KEY=${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0}
+      - VITE_SUPABASE_PROJECT_ID=local
+    command: sh -c "npm install && npx vite --host 0.0.0.0"
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    networks:
+      - dip-network
+
+volumes:
+  supabase-db-data:
+  node_modules:
+
+networks:
+  dip-network:
+    driver: bridge

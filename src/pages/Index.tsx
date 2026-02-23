@@ -1,17 +1,12 @@
-import Header from "@/components/Header";
+// Update this page (the content is just a fallback if you fail to update the page)
 
 const Index = () => {
   return (
-    <div className="min-h-screen bg-background">
-      <Header />
-      <main className="container flex flex-col items-center justify-center py-24 text-center">
-        <h1 className="mb-4 text-5xl font-extrabold tracking-tight text-foreground">
-          Welcome to DIP
-        </h1>
-        <p className="max-w-md text-lg text-muted-foreground">
-          Your trusted partner for quality and excellence. Get in touch with us today.
-        </p>
-      </main>
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="text-center">
+        <h1 className="mb-4 text-4xl font-bold">Welcome to Your Blank App</h1>
+        <p className="text-xl text-muted-foreground">Start building your amazing project here!</p>
+      </div>
     </div>
   );
 };

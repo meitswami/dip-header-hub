@@ -21,15 +21,12 @@ import CaseDocuments from "./pages/CaseDocuments";
 import KnowledgeBase from "./pages/KnowledgeBase";
 import LegalReference from "./pages/LegalReference";
 import CaseComparison from "./pages/CaseComparison";
-import AdminUsers from "./pages/AdminUsers";
 import DataCleanup from "./pages/DataCleanup";
 import DataExport from "./pages/DataExport";
 import ProfileSettings from "./pages/ProfileSettings";
 import Settings from "./pages/Settings";
 import StaffMessages from "./pages/StaffMessages";
 import StaffManagement from "./pages/StaffManagement";
-import ModulePermissions from "./pages/ModulePermissions";
-import GroupManagement from "./pages/GroupManagement";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -57,13 +54,11 @@ function AppRoutes() {
       <Route path="/knowledge-base" element={<RequireAuth><KnowledgeBase /></RequireAuth>} />
       <Route path="/legal" element={<RequireAuth><LegalReference /></RequireAuth>} />
       <Route path="/compare" element={<RequireAuth><CaseComparison /></RequireAuth>} />
-      <Route path="/admin/users" element={<RequireAuth><AdminUsers /></RequireAuth>} />
+      <Route path="/admin/users" element={<RequireAuth><StaffManagement /></RequireAuth>} />
+      <Route path="/admin/staff" element={<RequireAuth><StaffManagement /></RequireAuth>} />
       <Route path="/admin/cleanup" element={<RequireAuth><DataCleanup /></RequireAuth>} />
       <Route path="/admin/export" element={<RequireAuth><DataExport /></RequireAuth>} />
       <Route path="/admin/settings" element={<RequireAuth><Settings /></RequireAuth>} />
-      <Route path="/admin/staff" element={<RequireAuth><StaffManagement /></RequireAuth>} />
-      <Route path="/admin/modules" element={<RequireAuth><ModulePermissions /></RequireAuth>} />
-      <Route path="/admin/groups" element={<RequireAuth><GroupManagement /></RequireAuth>} />
       <Route path="/messages" element={<RequireAuth><StaffMessages /></RequireAuth>} />
       <Route path="/profile" element={<RequireAuth><ProfileSettings /></RequireAuth>} />
       <Route path="*" element={<NotFound />} />

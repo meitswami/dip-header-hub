@@ -957,27 +957,33 @@ export type Database = {
           badge_number: string | null
           created_at: string
           department: string | null
+          designation: string | null
           full_name: string
           id: string
           phone: string | null
+          rank: string | null
           updated_at: string
         }
         Insert: {
           badge_number?: string | null
           created_at?: string
           department?: string | null
+          designation?: string | null
           full_name?: string
           id: string
           phone?: string | null
+          rank?: string | null
           updated_at?: string
         }
         Update: {
           badge_number?: string | null
           created_at?: string
           department?: string | null
+          designation?: string | null
           full_name?: string
           id?: string
           phone?: string | null
+          rank?: string | null
           updated_at?: string
         }
         Relationships: []

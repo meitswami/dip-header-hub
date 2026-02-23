@@ -1,6 +1,7 @@
 import {
   LayoutDashboard, FolderOpen, Upload, MessageSquare, FileText,
-  Users, Settings as SettingsIcon, Shield, LogOut, BookOpen, Brain, FolderArchive, Languages, GitCompare, Trash2, Download, Cog, Mail, UserCog
+  Users, Shield, LogOut, BookOpen, Brain, FolderArchive, Languages,
+  GitCompare, Trash2, Download, Cog, Mail, UserCog, KeyRound, ShieldCheck, Group
 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/hooks/useAuth';
@@ -28,12 +29,15 @@ export function AppSidebar() {
     { title: t('nav.legal'), url: '/legal', icon: BookOpen },
     { title: 'Case Compare', url: '/compare', icon: GitCompare },
     { title: 'Messages', url: '/messages', icon: Mail },
-    { title: t('nav.settings'), url: '/admin/settings', icon: Cog },
+  ];
+
+  const rbacNav = [
+    { title: 'Roles & Permissions', url: '/admin/users', icon: KeyRound },
+    { title: 'Staff Management', url: '/admin/staff', icon: UserCog },
   ];
 
   const adminNav = [
-    { title: t('nav.users'), url: '/admin/users', icon: Users },
-    { title: 'Staff Management', url: '/admin/staff', icon: UserCog },
+    { title: t('nav.settings'), url: '/admin/settings', icon: Cog },
     { title: 'Data Cleanup', url: '/admin/cleanup', icon: Trash2 },
     { title: 'Data Export', url: '/admin/export', icon: Download },
   ];
@@ -85,23 +89,46 @@ export function AppSidebar() {
         </SidebarGroup>
 
         {role === 'admin' && (
-          <SidebarGroup>
-            <SidebarGroupLabel>{t('nav.admin')}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {adminNav.map(item => (
-                  <SidebarMenuItem key={item.url}>
-                    <SidebarMenuButton asChild>
-                      <NavLink to={item.url} className="hover:bg-sidebar-accent" activeClassName="bg-sidebar-accent text-sidebar-primary font-medium">
-                        <item.icon className="mr-2 h-4 w-4" />
-                        <span>{item.title}</span>
-                      </NavLink>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+          <>
+            <SidebarGroup>
+              <SidebarGroupLabel>
+                <ShieldCheck className="mr-1 h-3.5 w-3.5 inline" />
+                RBAC & Staff
+              </SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {rbacNav.map(item => (
+                    <SidebarMenuItem key={item.url}>
+                      <SidebarMenuButton asChild>
+                        <NavLink to={item.url} className="hover:bg-sidebar-accent" activeClassName="bg-sidebar-accent text-sidebar-primary font-medium">
+                          <item.icon className="mr-2 h-4 w-4" />
+                          <span>{item.title}</span>
+                        </NavLink>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+
+            <SidebarGroup>
+              <SidebarGroupLabel>{t('nav.admin')}</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {adminNav.map(item => (
+                    <SidebarMenuItem key={item.url}>
+                      <SidebarMenuButton asChild>
+                        <NavLink to={item.url} className="hover:bg-sidebar-accent" activeClassName="bg-sidebar-accent text-sidebar-primary font-medium">
+                          <item.icon className="mr-2 h-4 w-4" />
+                          <span>{item.title}</span>
+                        </NavLink>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </>
         )}
       </SidebarContent>
 

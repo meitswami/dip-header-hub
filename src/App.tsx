@@ -25,6 +25,7 @@ import AdminUsers from "./pages/AdminUsers";
 import DataCleanup from "./pages/DataCleanup";
 import DataExport from "./pages/DataExport";
 import ProfileSettings from "./pages/ProfileSettings";
+import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -55,6 +56,7 @@ function AppRoutes() {
       <Route path="/admin/users" element={<RequireAuth><AdminUsers /></RequireAuth>} />
       <Route path="/admin/cleanup" element={<RequireAuth><DataCleanup /></RequireAuth>} />
       <Route path="/admin/export" element={<RequireAuth><DataExport /></RequireAuth>} />
+      <Route path="/admin/settings" element={<RequireAuth><Settings /></RequireAuth>} />
       <Route path="/profile" element={<RequireAuth><ProfileSettings /></RequireAuth>} />
       <Route path="*" element={<NotFound />} />
     </Routes>

@@ -192,7 +192,7 @@ export default function CaseDocuments() {
                   className="cursor-pointer"
                   onClick={() => setFilterCategory(cat)}
                 >
-                  {DOC_CATEGORIES.find(c => c.value === cat)?.label || cat} ({count})
+                  {DOC_CATEGORIES.find(c => c.value === cat)?.label || cat} ({String(count)})
                 </Badge>
               ))}
             </div>
@@ -233,7 +233,7 @@ export default function CaseDocuments() {
                       )}
                     </div>
                     <Badge variant="outline">
-                      {DOC_CATEGORIES.find(c => c.value === doc.category)?.label || doc.category}
+                      {String(DOC_CATEGORIES.find(c => c.value === (doc as any).category)?.label || (doc as any).category || '')}
                     </Badge>
                     <Button variant="ghost" size="icon" onClick={() => deleteDoc(doc)}>
                       <Trash2 className="h-4 w-4" />

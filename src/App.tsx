@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { ThemeProvider } from "@/hooks/useTheme";
+import { useModulePermissions } from "@/hooks/useModulePermissions";
 import { AppLayout } from "@/components/AppLayout";
 import { Loader2 } from "lucide-react";
 
@@ -38,6 +39,16 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <AppLayout>{children}</AppLayout>;
 }
 
+/** Wraps a route element with module permission check. Redirects to / if denied. */
+function RequireModule({ moduleKey, children }: { moduleKey: string; children: React.ReactNode }) {
+  const { isModuleAllowed, loading } = useModulePermissions();
+  const { role } = useAuth();
+  // Admins bypass, and don't block while loading
+  if (role === 'admin' || loading) return <>{children}</>;
+  if (!isModuleAllowed(moduleKey)) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
 function AppRoutes() {
   return (
     <Routes>
@@ -47,13 +58,13 @@ function AppRoutes() {
       <Route path="/cases/new" element={<RequireAuth><NewCase /></RequireAuth>} />
       <Route path="/cases/:id" element={<RequireAuth><CaseDetail /></RequireAuth>} />
       <Route path="/cases/:id/records" element={<RequireAuth><CaseRecords /></RequireAuth>} />
-      <Route path="/upload" element={<RequireAuth><DataUpload /></RequireAuth>} />
-      <Route path="/chat" element={<RequireAuth><AIChat /></RequireAuth>} />
-      <Route path="/reports" element={<RequireAuth><Reports /></RequireAuth>} />
-      <Route path="/documents" element={<RequireAuth><CaseDocuments /></RequireAuth>} />
-      <Route path="/knowledge-base" element={<RequireAuth><KnowledgeBase /></RequireAuth>} />
-      <Route path="/legal" element={<RequireAuth><LegalReference /></RequireAuth>} />
-      <Route path="/compare" element={<RequireAuth><CaseComparison /></RequireAuth>} />
+      <Route path="/upload" element={<RequireAuth><RequireModule moduleKey="data_upload"><DataUpload /></RequireModule></RequireAuth>} />
+      <Route path="/chat" element={<RequireAuth><RequireModule moduleKey="ai_chat"><AIChat /></RequireModule></RequireAuth>} />
+      <Route path="/reports" element={<RequireAuth><RequireModule moduleKey="reports"><Reports /></RequireModule></RequireAuth>} />
+      <Route path="/documents" element={<RequireAuth><RequireModule moduleKey="documents"><CaseDocuments /></RequireModule></RequireAuth>} />
+      <Route path="/knowledge-base" element={<RequireAuth><RequireModule moduleKey="knowledge_base"><KnowledgeBase /></RequireModule></RequireAuth>} />
+      <Route path="/legal" element={<RequireAuth><RequireModule moduleKey="legal_reference"><LegalReference /></RequireModule></RequireAuth>} />
+      <Route path="/compare" element={<RequireAuth><RequireModule moduleKey="case_compare"><CaseComparison /></RequireModule></RequireAuth>} />
       <Route path="/admin/users" element={<RequireAuth><StaffManagement /></RequireAuth>} />
       <Route path="/admin/staff" element={<RequireAuth><StaffManagement /></RequireAuth>} />
       <Route path="/admin/cleanup" element={<RequireAuth><DataCleanup /></RequireAuth>} />

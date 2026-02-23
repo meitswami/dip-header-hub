@@ -713,6 +713,41 @@ export type Database = {
           },
         ]
       }
+      group_module_permissions: {
+        Row: {
+          enabled: boolean
+          group_id: string
+          id: string
+          module_key: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          enabled?: boolean
+          group_id: string
+          id?: string
+          module_key: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          enabled?: boolean
+          group_id?: string
+          id?: string
+          module_key?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "group_module_permissions_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "user_groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       investigation_insights: {
         Row: {
           case_id: string

@@ -28,6 +28,8 @@ import ProfileSettings from "./pages/ProfileSettings";
 import Settings from "./pages/Settings";
 import StaffMessages from "./pages/StaffMessages";
 import StaffManagement from "./pages/StaffManagement";
+import ModulePermissions from "./pages/ModulePermissions";
+import GroupManagement from "./pages/GroupManagement";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -60,6 +62,8 @@ function AppRoutes() {
       <Route path="/admin/export" element={<RequireAuth><DataExport /></RequireAuth>} />
       <Route path="/admin/settings" element={<RequireAuth><Settings /></RequireAuth>} />
       <Route path="/admin/staff" element={<RequireAuth><StaffManagement /></RequireAuth>} />
+      <Route path="/admin/modules" element={<RequireAuth><ModulePermissions /></RequireAuth>} />
+      <Route path="/admin/groups" element={<RequireAuth><GroupManagement /></RequireAuth>} />
       <Route path="/messages" element={<RequireAuth><StaffMessages /></RequireAuth>} />
       <Route path="/profile" element={<RequireAuth><ProfileSettings /></RequireAuth>} />
       <Route path="*" element={<NotFound />} />

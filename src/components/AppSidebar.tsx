@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, FolderOpen, Upload, MessageSquare, FileText,
   Users, Shield, LogOut, BookOpen, Brain, FolderArchive, Languages,
-  GitCompare, Trash2, Download, Cog, Mail, UserCog, KeyRound, ShieldCheck, Group
+  GitCompare, Trash2, Download, Cog, Mail, UserCog, KeyRound, ShieldCheck, Group, ToggleRight
 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/hooks/useAuth';
@@ -34,6 +34,8 @@ export function AppSidebar() {
   const rbacNav = [
     { title: 'Roles & Permissions', url: '/admin/users', icon: KeyRound },
     { title: 'Staff Management', url: '/admin/staff', icon: UserCog },
+    { title: 'Module Permissions', url: '/admin/modules', icon: ToggleRight },
+    { title: 'Groups', url: '/admin/groups', icon: Group },
   ];
 
   const adminNav = [

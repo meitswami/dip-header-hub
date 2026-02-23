@@ -8,8 +8,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
-import { Upload, FileSpreadsheet, Loader2, CheckCircle, AlertCircle, ArrowRight, X, Files, Phone } from 'lucide-react';
+import { Upload, FileSpreadsheet, Loader2, CheckCircle, AlertCircle, ArrowRight, X, Files, Phone, ShieldAlert } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
 import {
   parseSpreadsheet, ParseResult, autoMapColumns, mapRowToRecord,
   CDR_COLUMN_MAP, IPDR_COLUMN_MAP, SDR_COLUMN_MAP, TOWER_COLUMN_MAP,
@@ -23,7 +25,6 @@ const TYPE_MAP: Record<string, { table: string; columnMap: Record<string, string
   sdr: { table: 'sdr_records', columnMap: SDR_COLUMN_MAP },
 };
 
-// Extract phone number from filename like "7568191111_1.csv" or "CDR_8619922222.csv"
 function extractPhoneFromFilename(filename: string): string | null {
   const matches = filename.match(/(\d{10,15})/);
   return matches ? matches[1] : null;
@@ -40,6 +41,15 @@ interface FileEntry {
   numberLabel: string;
 }
 
+interface ProcurementMeta {
+  phone_number: string;
+  operator_name: string;
+  request_ref_no: string;
+  period_from: string;
+  period_to: string;
+  notes: string;
+}
+
 export default function DataUpload() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -49,8 +59,15 @@ export default function DataUpload() {
   const [uploadType, setUploadType] = useState('cdr');
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [step, setStep] = useState<'select' | 'review' | 'processing' | 'done'>('select');
+  const [step, setStep] = useState<'select' | 'procurement' | 'review' | 'processing' | 'done'>('select');
   const [existingAliases, setExistingAliases] = useState<Record<string, string>>({});
+  const [myCaseRole, setMyCaseRole] = useState<string | null>(null);
+  const [checkingRole, setCheckingRole] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+  const [procurement, setProcurement] = useState<ProcurementMeta>({
+    phone_number: '', operator_name: '', request_ref_no: '',
+    period_from: '', period_to: '', notes: '',
+  });
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -58,7 +75,22 @@ export default function DataUpload() {
       .then(({ data }) => { if (data) setCases(data); });
   }, []);
 
-  // Fetch existing aliases for the selected case
+  // Check user's case role when case is selected
+  useEffect(() => {
+    if (!selectedCase || !user) { setMyCaseRole(null); return; }
+    setCheckingRole(true);
+    supabase.from('case_assignments')
+      .select('case_role')
+      .eq('case_id', selectedCase)
+      .eq('user_id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        setMyCaseRole(data?.case_role || null);
+        setCheckingRole(false);
+      });
+  }, [selectedCase, user?.id]);
+
+  // Fetch existing aliases
   useEffect(() => {
     if (!selectedCase) return;
     supabase.from('aliases').select('phone_number, alias_name').eq('case_id', selectedCase)
@@ -71,6 +103,36 @@ export default function DataUpload() {
       });
   }, [selectedCase]);
 
+  const canUpload = myCaseRole === 'procurement' || myCaseRole === 'case_incharge';
+
+  // Check for duplicate procurement data
+  async function checkDuplicate(): Promise<boolean> {
+    if (!procurement.phone_number || !procurement.period_from || !procurement.period_to) return false;
+    const { data } = await supabase
+      .from('data_procurements')
+      .select('id, phone_number, period_from, period_to, data_type')
+      .eq('case_id', selectedCase)
+      .eq('data_type', uploadType)
+      .eq('phone_number', procurement.phone_number);
+
+    if (data && data.length > 0) {
+      const overlap = data.find(d => {
+        if (!d.period_from || !d.period_to) return false;
+        return d.period_from <= procurement.period_to && d.period_to >= procurement.period_from;
+      });
+      if (overlap) {
+        setDuplicateWarning(`Data for ${procurement.phone_number} (${uploadType.toUpperCase()}) already exists for overlapping period ${overlap.period_from} to ${overlap.period_to}. You may append or skip.`);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  const handleProcurementNext = async () => {
+    await checkDuplicate();
+    setStep('select');
+  };
+
   const handleFilesSelect = async (selectedFiles: FileList) => {
     const typeConfig = TYPE_MAP[uploadType];
     const entries: FileEntry[] = [];
@@ -78,17 +140,12 @@ export default function DataUpload() {
     for (const f of Array.from(selectedFiles)) {
       const detectedNumber = extractPhoneFromFilename(f.name);
       entries.push({
-        file: f,
-        parsed: null,
-        mapping: {},
-        status: 'pending',
-        insertedCount: 0,
-        detectedNumber,
+        file: f, parsed: null, mapping: {}, status: 'pending',
+        insertedCount: 0, detectedNumber,
         numberLabel: detectedNumber ? (existingAliases[detectedNumber] || '') : '',
       });
     }
 
-    // Parse all files and auto-map columns
     for (let i = 0; i < entries.length; i++) {
       entries[i].status = 'parsing';
       try {
@@ -97,6 +154,24 @@ export default function DataUpload() {
         entries[i] = { ...entries[i], parsed: result, mapping: autoMap, status: 'ready' };
       } catch (err: any) {
         entries[i] = { ...entries[i], status: 'error', error: err.message };
+      }
+    }
+
+    // Check for file hash duplicates
+    for (const entry of entries) {
+      const buffer = await entry.file.arrayBuffer();
+      const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const fileHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      const { data: existing } = await supabase
+        .from('evidence_logs')
+        .select('id')
+        .eq('case_id', selectedCase)
+        .eq('file_hash', fileHash)
+        .limit(1);
+      if (existing && existing.length > 0) {
+        entry.status = 'error';
+        entry.error = 'Duplicate file — this exact file has already been uploaded';
       }
     }
 
@@ -118,42 +193,50 @@ export default function DataUpload() {
       setFiles([...updated]);
 
       try {
-        // Save alias if number detected and label provided
         if (entry.detectedNumber && entry.numberLabel && !existingAliases[entry.detectedNumber]) {
           await supabase.from('aliases').insert({
-            case_id: selectedCase,
-            phone_number: entry.detectedNumber,
-            alias_name: entry.numberLabel,
-            created_by: user.id,
+            case_id: selectedCase, phone_number: entry.detectedNumber,
+            alias_name: entry.numberLabel, created_by: user.id,
           });
           setExistingAliases(prev => ({ ...prev, [entry.detectedNumber!]: entry.numberLabel }));
         }
 
-        // SHA256 hash
         const buffer = await entry.file.arrayBuffer();
         const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
         const hashArray = Array.from(new Uint8Array(hashBuffer));
         const fileHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
-        // Upload to storage
         const filePath = `${user.id}/${selectedCase}/${Date.now()}_${entry.file.name}`;
         const { error: storageError } = await supabase.storage.from('evidence').upload(filePath, entry.file);
         if (storageError) throw storageError;
-        const { data: urlData } = supabase.storage.from('evidence').getPublicUrl(filePath);
 
         // Log evidence
-        await supabase.from('evidence_logs').insert({
+        const { data: evidenceData } = await supabase.from('evidence_logs').insert({
           case_id: selectedCase, file_name: entry.file.name, file_hash: fileHash,
-          file_url: urlData.publicUrl, file_size: entry.file.size,
-          upload_type: uploadType, uploaded_by: user.id,
-        });
+          file_size: entry.file.size, upload_type: uploadType, uploaded_by: user.id,
+        }).select('id').single();
 
-        // Auto-map and insert records with source_file reference
+        // Create procurement record
+        if (evidenceData) {
+          await supabase.from('data_procurements').insert({
+            case_id: selectedCase,
+            evidence_log_id: evidenceData.id,
+            procured_by: user.id,
+            phone_number: procurement.phone_number || entry.detectedNumber || null,
+            data_type: uploadType,
+            operator_name: procurement.operator_name || null,
+            request_ref_no: procurement.request_ref_no || null,
+            period_from: procurement.period_from || null,
+            period_to: procurement.period_to || null,
+            notes: procurement.notes || null,
+            status: 'uploaded',
+          });
+        }
+
         const records = entry.parsed.rows.map(row => ({
           case_id: selectedCase,
-          source_file: entry.file.name,
           ...mapRowToRecord(row, entry.mapping),
-          raw_data: row, // Store full raw JSON for flexible querying
+          raw_data: row,
         }));
 
         const BATCH_SIZE = 500;
@@ -175,7 +258,6 @@ export default function DataUpload() {
       }
     }
 
-    // Run auto-analysis for CDR data
     if (uploadType === 'cdr') {
       toast({ title: 'Running auto-analysis...', description: 'Detecting patterns in uploaded data' });
       try {
@@ -192,19 +274,12 @@ export default function DataUpload() {
   };
 
   const updateLabel = (idx: number, label: string) => {
-    setFiles(prev => {
-      const next = [...prev];
-      next[idx] = { ...next[idx], numberLabel: label };
-      return next;
-    });
+    setFiles(prev => { const next = [...prev]; next[idx] = { ...next[idx], numberLabel: label }; return next; });
   };
-
-  const removeFile = (idx: number) => {
-    setFiles(prev => prev.filter((_, i) => i !== idx));
-  };
-
+  const removeFile = (idx: number) => setFiles(prev => prev.filter((_, i) => i !== idx));
   const reset = () => {
-    setFiles([]); setStep('select');
+    setFiles([]); setStep('select'); setDuplicateWarning(null);
+    setProcurement({ phone_number: '', operator_name: '', request_ref_no: '', period_from: '', period_to: '', notes: '' });
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -212,17 +287,18 @@ export default function DataUpload() {
   const totalInserted = files.reduce((s, e) => s + e.insertedCount, 0);
   const readyCount = files.filter(e => e.status === 'ready').length;
   const mappedCount = files.filter(e => Object.keys(e.mapping).length > 0).length;
+  const stepLabels = ['Procurement Info', 'Select Files', 'Review & Name', 'Processing', 'Done'];
+  const stepKeys = ['procurement', 'select', 'review', 'processing', 'done'];
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <h1 className="text-2xl font-bold tracking-tight">Data Upload</h1>
-      <p className="text-muted-foreground">Upload multiple files — columns are auto-detected, data stored as searchable JSON.</p>
+      <p className="text-muted-foreground">Upload CDR/IPDR/Tower/SDR data with procurement tracking and duplicate detection.</p>
 
       {/* Step indicator */}
-      <div className="flex items-center gap-2 text-sm">
-        {['Select Files', 'Review & Name', 'Processing', 'Done'].map((label, i) => {
-          const steps = ['select', 'review', 'processing', 'done'];
-          const currentIdx = steps.indexOf(step);
+      <div className="flex items-center gap-2 text-sm flex-wrap">
+        {stepLabels.map((label, i) => {
+          const currentIdx = stepKeys.indexOf(step);
           return (
             <div key={label} className="flex items-center gap-2">
               <div className={`h-7 w-7 rounded-full flex items-center justify-center text-xs font-medium ${
@@ -230,29 +306,45 @@ export default function DataUpload() {
                 i < currentIdx ? 'bg-success text-success-foreground' : 'bg-muted text-muted-foreground'
               }`}>{i < currentIdx ? '✓' : i + 1}</div>
               <span className={i === currentIdx ? 'font-medium' : 'text-muted-foreground'}>{label}</span>
-              {i < 3 && <ArrowRight className="h-4 w-4 text-muted-foreground" />}
+              {i < stepLabels.length - 1 && <ArrowRight className="h-4 w-4 text-muted-foreground" />}
             </div>
           );
         })}
       </div>
 
-      {step === 'select' && (
+      {/* Role check */}
+      {selectedCase && !checkingRole && !canUpload && myCaseRole !== null && (
+        <Card className="border-destructive/50">
+          <CardContent className="p-4 flex items-center gap-3">
+            <ShieldAlert className="h-5 w-5 text-destructive" />
+            <div>
+              <p className="text-sm font-medium text-destructive">Access Denied</p>
+              <p className="text-xs text-muted-foreground">
+                Only Procurement or Case Incharge (CIO) can upload data. Your role: <Badge variant="outline">{myCaseRole}</Badge>
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Step: Procurement metadata */}
+      {step === 'procurement' && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Upload Evidence Files</CardTitle>
-            <CardDescription>Select multiple .xlsx, .xls, .csv files — no manual mapping needed</CardDescription>
+            <CardTitle className="text-lg">Procurement Details</CardTitle>
+            <CardDescription>Enter procurement metadata before uploading files</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Select Case</Label>
+                <Label>Select Case *</Label>
                 <Select value={selectedCase} onValueChange={setSelectedCase}>
                   <SelectTrigger><SelectValue placeholder="Choose a case..." /></SelectTrigger>
                   <SelectContent>{cases.map(c => <SelectItem key={c.id} value={c.id}>{c.title}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Data Type</Label>
+                <Label>Data Type *</Label>
                 <Select value={uploadType} onValueChange={setUploadType}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -264,19 +356,105 @@ export default function DataUpload() {
                 </Select>
               </div>
             </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Phone Number</Label>
+                <Input value={procurement.phone_number} onChange={e => setProcurement(p => ({ ...p, phone_number: e.target.value }))} placeholder="e.g. 7568191111" />
+              </div>
+              <div className="space-y-2">
+                <Label>Operator Name</Label>
+                <Input value={procurement.operator_name} onChange={e => setProcurement(p => ({ ...p, operator_name: e.target.value }))} placeholder="e.g. Jio, Airtel" />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label>Request Ref No.</Label>
+                <Input value={procurement.request_ref_no} onChange={e => setProcurement(p => ({ ...p, request_ref_no: e.target.value }))} placeholder="Reference number" />
+              </div>
+              <div className="space-y-2">
+                <Label>Period From</Label>
+                <Input type="date" value={procurement.period_from} onChange={e => setProcurement(p => ({ ...p, period_from: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Period To</Label>
+                <Input type="date" value={procurement.period_to} onChange={e => setProcurement(p => ({ ...p, period_to: e.target.value }))} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <Textarea value={procurement.notes} onChange={e => setProcurement(p => ({ ...p, notes: e.target.value }))} placeholder="Any procurement notes..." rows={2} />
+            </div>
+
+            {duplicateWarning && (
+              <div className="p-3 rounded-lg bg-warning/10 border border-warning/30 text-sm text-warning flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                <span>{duplicateWarning}</span>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={reset}>Cancel</Button>
+              <Button onClick={handleProcurementNext} disabled={!selectedCase}>
+                Next: Select Files <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {step === 'select' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Upload Evidence Files</CardTitle>
+            <CardDescription>Select multiple .xlsx, .xls, .csv files — no manual mapping needed</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {!selectedCase && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Select Case</Label>
+                  <Select value={selectedCase} onValueChange={setSelectedCase}>
+                    <SelectTrigger><SelectValue placeholder="Choose a case..." /></SelectTrigger>
+                    <SelectContent>{cases.map(c => <SelectItem key={c.id} value={c.id}>{c.title}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Data Type</Label>
+                  <Select value={uploadType} onValueChange={setUploadType}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cdr">CDR (Call Detail Records)</SelectItem>
+                      <SelectItem value="ipdr">IPDR (IP Detail Records)</SelectItem>
+                      <SelectItem value="tower_dump">Tower Dump</SelectItem>
+                      <SelectItem value="sdr">SDR (Subscriber Detail Records)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            {/* Start with procurement step button */}
+            {selectedCase && canUpload && step === 'select' && files.length === 0 && (
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={() => setStep('procurement')}>
+                  Enter Procurement Details First
+                </Button>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label>Files</Label>
               <div className="border-2 border-dashed border-border rounded-lg p-8 text-center cursor-pointer hover:border-primary/50 transition-colors"
-                onClick={() => fileRef.current?.click()}>
+                onClick={() => { if (canUpload) fileRef.current?.click(); }}>
                 <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">Click to select files (Ctrl/Cmd for multiple)</p>
               </div>
               <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" multiple
                 onChange={e => {
                   const fl = e.target.files;
-                  if (fl && fl.length > 0 && selectedCase) handleFilesSelect(fl);
-                  else if (fl && fl.length > 0) toast({ title: 'Select a case first', variant: 'destructive' });
+                  if (fl && fl.length > 0 && selectedCase && canUpload) handleFilesSelect(fl);
+                  else if (fl && fl.length > 0 && !selectedCase) toast({ title: 'Select a case first', variant: 'destructive' });
+                  else if (fl && fl.length > 0 && !canUpload) toast({ title: 'You do not have upload permission for this case', variant: 'destructive' });
                 }}
                 className="hidden" />
             </div>
@@ -311,8 +489,6 @@ export default function DataUpload() {
                     {entry.status === 'error' && <span className="text-destructive">· {entry.error}</span>}
                   </div>
                 </div>
-
-                {/* Phone number detection & naming */}
                 {entry.detectedNumber && (
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <Phone className="h-4 w-4 text-muted-foreground" />
@@ -322,22 +498,16 @@ export default function DataUpload() {
                         {existingAliases[entry.detectedNumber]}
                       </span>
                     ) : (
-                      <Input
-                        className="h-7 w-32 text-xs"
-                        placeholder="Name this number"
-                        value={entry.numberLabel}
-                        onChange={e => updateLabel(i, e.target.value)}
-                      />
+                      <Input className="h-7 w-32 text-xs" placeholder="Name this number"
+                        value={entry.numberLabel} onChange={e => updateLabel(i, e.target.value)} />
                     )}
                   </div>
                 )}
-
                 <button onClick={() => removeFile(i)} className="text-muted-foreground hover:text-destructive">
                   <X className="h-4 w-4" />
                 </button>
               </div>
             ))}
-
             <div className="flex justify-between pt-2">
               <Button variant="outline" onClick={reset}>Back</Button>
               <Button onClick={handleProcessAll} disabled={readyCount === 0}>
@@ -350,9 +520,7 @@ export default function DataUpload() {
 
       {step === 'processing' && (
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Processing Files...</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle className="text-lg">Processing Files...</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             {files.map((entry, i) => (
               <div key={i} className="space-y-1">
@@ -364,9 +532,7 @@ export default function DataUpload() {
                     {entry.status === 'ready' && <FileSpreadsheet className="h-3 w-3 text-muted-foreground" />}
                     <span className="truncate max-w-64">{entry.file.name}</span>
                   </span>
-                  <span className="text-xs text-muted-foreground">
-                    {entry.insertedCount}/{entry.parsed?.totalRows ?? 0}
-                  </span>
+                  <span className="text-xs text-muted-foreground">{entry.insertedCount}/{entry.parsed?.totalRows ?? 0}</span>
                 </div>
                 <Progress value={entry.parsed?.totalRows ? (entry.insertedCount / entry.parsed.totalRows) * 100 : 0} className="h-1.5" />
               </div>

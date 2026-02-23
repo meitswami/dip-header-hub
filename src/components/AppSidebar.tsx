@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, FolderOpen, Upload, MessageSquare, FileText,
-  Users, Settings as SettingsIcon, Shield, LogOut, BookOpen, Brain, FolderArchive, Languages, GitCompare, Trash2, Download, Cog
+  Users, Settings as SettingsIcon, Shield, LogOut, BookOpen, Brain, FolderArchive, Languages, GitCompare, Trash2, Download, Cog, Mail
 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/hooks/useAuth';
@@ -27,6 +27,7 @@ export function AppSidebar() {
     { title: t('nav.kb'), url: '/knowledge-base', icon: Brain },
     { title: t('nav.legal'), url: '/legal', icon: BookOpen },
     { title: 'Case Compare', url: '/compare', icon: GitCompare },
+    { title: 'Messages', url: '/messages', icon: Mail },
     { title: t('nav.settings'), url: '/admin/settings', icon: Cog },
   ];
 

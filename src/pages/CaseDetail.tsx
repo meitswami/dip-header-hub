@@ -22,6 +22,8 @@ import CaseDocumentManager from '@/components/CaseDocumentManager';
 import PersonProfileManager from '@/components/PersonProfileManager';
 import CaseDataSummary from '@/components/CaseDataSummary';
 import CrossCDRCommonNumbers from '@/components/CrossCDRCommonNumbers';
+import CaseTeamManager from '@/components/CaseTeamManager';
+import DataAssignmentPanel from '@/components/DataAssignmentPanel';
 
 export default function CaseDetail() {
   const { id } = useParams<{ id: string }>();
@@ -114,6 +116,12 @@ export default function CaseDetail() {
 
       {/* Persons */}
       <PersonProfileManager caseId={id!} />
+
+      {/* Case Team */}
+      <CaseTeamManager caseId={id!} />
+
+      {/* Data Access Assignments */}
+      <DataAssignmentPanel caseId={id!} />
 
       {/* AI Training Panel + Alias Manager */}
       <div className="grid gap-4 md:grid-cols-2">

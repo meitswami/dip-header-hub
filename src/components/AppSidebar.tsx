@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, FolderOpen, Upload, MessageSquare, FileText,
-  Users, Settings as SettingsIcon, Shield, LogOut, BookOpen, Brain, FolderArchive, Languages, GitCompare, Trash2, Download, Cog, Mail
+  Users, Settings as SettingsIcon, Shield, LogOut, BookOpen, Brain, FolderArchive, Languages, GitCompare, Trash2, Download, Cog, Mail, UserCog
 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/hooks/useAuth';
@@ -33,6 +33,7 @@ export function AppSidebar() {
 
   const adminNav = [
     { title: t('nav.users'), url: '/admin/users', icon: Users },
+    { title: 'Staff Management', url: '/admin/staff', icon: UserCog },
     { title: 'Data Cleanup', url: '/admin/cleanup', icon: Trash2 },
     { title: 'Data Export', url: '/admin/export', icon: Download },
   ];

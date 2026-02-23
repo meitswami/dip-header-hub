@@ -32,10 +32,7 @@ export function AppSidebar() {
   ];
 
   const rbacNav = [
-    { title: 'Roles & Permissions', url: '/admin/users', icon: KeyRound },
     { title: 'Staff Management', url: '/admin/staff', icon: UserCog },
-    { title: 'Module Permissions', url: '/admin/modules', icon: ToggleRight },
-    { title: 'Groups', url: '/admin/groups', icon: Group },
   ];
 
   const adminNav = [

@@ -20,6 +20,8 @@ import TowerMap from '@/components/TowerMap';
 import CaseNotes from '@/components/CaseNotes';
 import CaseDocumentManager from '@/components/CaseDocumentManager';
 import PersonProfileManager from '@/components/PersonProfileManager';
+import CaseDataSummary from '@/components/CaseDataSummary';
+import CrossCDRCommonNumbers from '@/components/CrossCDRCommonNumbers';
 
 export default function CaseDetail() {
   const { id } = useParams<{ id: string }>();
@@ -101,6 +103,9 @@ export default function CaseDetail() {
         ))}
       </div>
 
+      {/* Data Summary */}
+      <CaseDataSummary caseId={id!} />
+
       {/* Case Notes */}
       <CaseNotes caseId={id!} />
 
@@ -144,7 +149,10 @@ export default function CaseDetail() {
           <CDRVisualization caseId={id!} />
         </TabsContent>
         <TabsContent value="common">
-          <CommonNumberAnalysis caseId={id!} />
+          <div className="space-y-4">
+            <CrossCDRCommonNumbers caseId={id!} />
+            <CommonNumberAnalysis caseId={id!} />
+          </div>
         </TabsContent>
         <TabsContent value="timeline">
           <TimelineReconstruction caseId={id!} />

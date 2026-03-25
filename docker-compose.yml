@@ -1,0 +1,193 @@
+# ===========================================
+# DIP — Digital Investigation Platform
+# Complete Offline Deployment
+# ===========================================
+#
+# Prerequisites:
+#   - Docker Desktop running
+#   - Ollama installed: https://ollama.ai
+#
+# Quick Start:
+#   1. ollama pull phi3:mini          # Download AI model (~2.3GB)
+#   2. ollama pull llava:7b           # (Optional) For OCR vision (~4GB)
+#   3. docker compose up -d           # Start all services
+#   4. Open http://localhost:8080
+#
+# RAM Budget (8GB system):
+#   - PostgreSQL + Supabase: ~1.5GB
+#   - Ollama (phi3:mini):   ~2.5GB
+#   - Frontend (nginx):     ~50MB
+#   - Browser:              ~1-2GB
+#   - Total:                ~5-6GB ✓
+#
+# Stop:       docker compose down
+# Reset DB:   docker compose down -v
+
+version: "3.8"
+
+services:
+  # ── PostgreSQL Database ────────────────────────────────
+  postgres:
+    image: supabase/postgres:15.6.1.143
+    container_name: dip-postgres
+    restart: unless-stopped
+    ports:
+      - "54322:5432"
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dip_secure_password_2024}
+      POSTGRES_DB: postgres
+      JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-for-dip-offline-mode}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./supabase/migrations:/docker-entrypoint-initdb.d/migrations
+      - ./supabase/seed.sql:/docker-entrypoint-initdb.d/seed.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - dip-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ── Supabase Auth ──────────────────────────────────────
+  auth:
+    image: supabase/gotrue:v2.143.0
+    container_name: dip-auth
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: http://localhost:8000
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD:-dip_secure_password_2024}@postgres:5432/postgres
+      GOTRUE_SITE_URL: http://localhost:8080
+      GOTRUE_URI_ALLOW_LIST: ""
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-for-dip-offline-mode}
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_SMTP_ADMIN_EMAIL: admin@dip.local
+      GOTRUE_MAILER_URLPATHS_INVITE: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
+    networks:
+      - dip-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # ── Supabase REST API (PostgREST) ─────────────────────
+  rest:
+    image: postgrest/postgrest:v12.0.1
+    container_name: dip-rest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD:-dip_secure_password_2024}@postgres:5432/postgres
+      PGRST_DB_SCHEMAS: public,storage
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-for-dip-offline-mode}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+    networks:
+      - dip-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # ── Supabase Storage ───────────────────────────────────
+  storage:
+    image: supabase/storage-api:v0.43.11
+    container_name: dip-storage
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ANON_KEY: ${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0}
+      SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU}
+      POSTGREST_URL: http://rest:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-for-dip-offline-mode}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD:-dip_secure_password_2024}@postgres:5432/postgres
+      FILE_SIZE_LIMIT: 52428800
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: stub
+      REGION: stub
+      GLOBAL_S3_BUCKET: stub
+    volumes:
+      - storage-data:/var/lib/storage
+    networks:
+      - dip-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # ── Kong API Gateway ───────────────────────────────────
+  kong:
+    image: kong:2.8.1
+    container_name: dip-kong
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+      - "8443:8443"
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl
+    volumes:
+      - ./kong.yml:/var/lib/kong/kong.yml:ro
+    depends_on:
+      - auth
+      - rest
+      - storage
+    networks:
+      - dip-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # ── Frontend (Production Build) ────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_SUPABASE_URL: http://localhost:8000
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0}
+        VITE_SUPABASE_PROJECT_ID: local
+    container_name: dip-frontend
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - kong
+    networks:
+      - dip-network
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+volumes:
+  postgres-data:
+  storage-data:
+
+networks:
+  dip-network:
+    driver: bridge

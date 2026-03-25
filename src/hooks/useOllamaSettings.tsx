@@ -7,6 +7,7 @@ export interface OllamaSettings {
 
 const STORAGE_KEY = 'dip-ollama-settings';
 
+<<<<<<< HEAD
 /** Base URL to use for browser fetch (avoids CORS by using Vite proxy when Ollama is local). */
 export function getOllamaFetchBase(url: string): string {
   const u = url.replace(/\/+$/, '');
@@ -15,6 +16,8 @@ export function getOllamaFetchBase(url: string): string {
   return u;
 }
 
+=======
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
 const DEFAULTS: OllamaSettings = {
   url: 'http://localhost:11434',
   model: 'phi3:mini',

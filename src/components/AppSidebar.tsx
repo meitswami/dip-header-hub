@@ -140,7 +140,10 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="p-3 border-t border-sidebar-border space-y-2">
+<<<<<<< HEAD
         <p className="text-[10px] text-muted-foreground text-center">Made by Meit Swami</p>
+=======
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
         <HealthIndicator />
         <div className="flex items-center justify-between">
           <NavLink to="/profile" className="flex flex-col min-w-0 hover:opacity-80" activeClassName="">

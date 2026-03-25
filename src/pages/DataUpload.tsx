@@ -41,6 +41,12 @@ interface FileEntry {
 }
 
 interface ProcurementMeta {
+<<<<<<< HEAD
+=======
+  phone_number: string;
+  operator_name: string;
+  request_ref_no: string;
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
   period_from: string;
   period_to: string;
   notes: string;
@@ -55,28 +61,57 @@ export default function DataUpload() {
   const [uploadType, setUploadType] = useState('cdr');
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [uploading, setUploading] = useState(false);
+<<<<<<< HEAD
   const [step, setStep] = useState<'select' | 'procurement' | 'review' | 'processing' | 'done' | 'mapping'>('select');
+=======
+  const [step, setStep] = useState<'select' | 'procurement' | 'review' | 'processing' | 'done'>('select');
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
   const [existingAliases, setExistingAliases] = useState<Record<string, string>>({});
   const [myCaseRole, setMyCaseRole] = useState<string | null>(null);
   const [checkingRole, setCheckingRole] = useState(false);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const [procurement, setProcurement] = useState<ProcurementMeta>({
+<<<<<<< HEAD
     period_from: '', period_to: '', notes: '',
   });
   const [casePersons, setCasePersons] = useState<{ id: string; name: string; phone_numbers: string[] | null }[]>([]);
   const [fileMapping, setFileMapping] = useState<Record<number, { type: 'new_person' | 'alias' | 'existing'; nameSoFather?: string; aliasName?: string; existingPersonId?: string }>>({});
   const [mappingSaving, setMappingSaving] = useState(false);
+=======
+    phone_number: '', operator_name: '', request_ref_no: '',
+    period_from: '', period_to: '', notes: '',
+  });
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api.getCases().then(data => setCases(data)).catch(() => setCases([]));
   }, []);
 
+<<<<<<< HEAD
   useEffect(() => {
     if (!selectedCase) { setMyCaseRole(null); return; }
     setMyCaseRole('procurement');
   }, [selectedCase]);
 
+=======
+  // Check user's case role when case is selected
+  useEffect(() => {
+    if (!selectedCase || !user) { setMyCaseRole(null); return; }
+    setCheckingRole(true);
+    supabase.from('case_assignments')
+      .select('case_role')
+      .eq('case_id', selectedCase)
+      .eq('user_id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        setMyCaseRole(data?.case_role || null);
+        setCheckingRole(false);
+      });
+  }, [selectedCase, user?.id]);
+
+  // Fetch existing aliases
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
   useEffect(() => {
     if (!selectedCase) return;
     api.getAliases(selectedCase).then(data => {
@@ -86,6 +121,7 @@ export default function DataUpload() {
     }).catch(() => {});
   }, [selectedCase]);
 
+<<<<<<< HEAD
   useEffect(() => {
     if (selectedCase && step === 'mapping') {
       api.getPersonProfiles(selectedCase).then(data => setCasePersons(data));
@@ -101,6 +137,30 @@ export default function DataUpload() {
 
   async function checkDuplicate(): Promise<boolean> {
     setDuplicateWarning(null);
+=======
+  const canUpload = myCaseRole === 'procurement' || myCaseRole === 'case_incharge';
+
+  // Check for duplicate procurement data
+  async function checkDuplicate(): Promise<boolean> {
+    if (!procurement.phone_number || !procurement.period_from || !procurement.period_to) return false;
+    const { data } = await supabase
+      .from('data_procurements')
+      .select('id, phone_number, period_from, period_to, data_type')
+      .eq('case_id', selectedCase)
+      .eq('data_type', uploadType)
+      .eq('phone_number', procurement.phone_number);
+
+    if (data && data.length > 0) {
+      const overlap = data.find(d => {
+        if (!d.period_from || !d.period_to) return false;
+        return d.period_from <= procurement.period_to && d.period_to >= procurement.period_from;
+      });
+      if (overlap) {
+        setDuplicateWarning(`Data for ${procurement.phone_number} (${uploadType.toUpperCase()}) already exists for overlapping period ${overlap.period_from} to ${overlap.period_to}. You may append or skip.`);
+        return true;
+      }
+    }
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
     return false;
   }
 
@@ -135,6 +195,24 @@ export default function DataUpload() {
       }
     }
 
+    // Check for file hash duplicates
+    for (const entry of entries) {
+      const buffer = await entry.file.arrayBuffer();
+      const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const fileHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      const { data: existing } = await supabase
+        .from('evidence_logs')
+        .select('id')
+        .eq('case_id', selectedCase)
+        .eq('file_hash', fileHash)
+        .limit(1);
+      if (existing && existing.length > 0) {
+        entry.status = 'error';
+        entry.error = 'Duplicate file — this exact file has already been uploaded';
+      }
+    }
+
     setFiles(entries);
     setStep('review');
   };
@@ -152,6 +230,7 @@ export default function DataUpload() {
       setFiles([...updated]);
 
       try {
+<<<<<<< HEAD
         const result = await api.upload(selectedCase, uploadType, entry.file, {
           period_from: procurement.period_from || undefined,
           period_to: procurement.period_to || undefined,
@@ -165,6 +244,66 @@ export default function DataUpload() {
         if (entry.detectedNumber && entry.numberLabel) {
           setExistingAliases(prev => ({ ...prev, [entry.detectedNumber!]: entry.numberLabel }));
         }
+=======
+        if (entry.detectedNumber && entry.numberLabel && !existingAliases[entry.detectedNumber]) {
+          await supabase.from('aliases').insert({
+            case_id: selectedCase, phone_number: entry.detectedNumber,
+            alias_name: entry.numberLabel, created_by: user.id,
+          });
+          setExistingAliases(prev => ({ ...prev, [entry.detectedNumber!]: entry.numberLabel }));
+        }
+
+        const buffer = await entry.file.arrayBuffer();
+        const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const fileHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+        const filePath = `${user.id}/${selectedCase}/${Date.now()}_${entry.file.name}`;
+        const { error: storageError } = await supabase.storage.from('evidence').upload(filePath, entry.file);
+        if (storageError) throw storageError;
+
+        // Log evidence
+        const { data: evidenceData } = await supabase.from('evidence_logs').insert({
+          case_id: selectedCase, file_name: entry.file.name, file_hash: fileHash,
+          file_size: entry.file.size, upload_type: uploadType, uploaded_by: user.id,
+        }).select('id').single();
+
+        // Create procurement record
+        if (evidenceData) {
+          await supabase.from('data_procurements').insert({
+            case_id: selectedCase,
+            evidence_log_id: evidenceData.id,
+            procured_by: user.id,
+            phone_number: procurement.phone_number || entry.detectedNumber || null,
+            data_type: uploadType,
+            operator_name: procurement.operator_name || null,
+            request_ref_no: procurement.request_ref_no || null,
+            period_from: procurement.period_from || null,
+            period_to: procurement.period_to || null,
+            notes: procurement.notes || null,
+            status: 'uploaded',
+          });
+        }
+
+        const records = entry.parsed.rows.map(row => ({
+          case_id: selectedCase,
+          ...mapRowToRecord(row, entry.mapping),
+          raw_data: row,
+        }));
+
+        const BATCH_SIZE = 500;
+        let inserted = 0;
+        for (let j = 0; j < records.length; j += BATCH_SIZE) {
+          const batch = records.slice(j, j + BATCH_SIZE);
+          const { error } = await supabase.from(typeConfig.table as any).insert(batch as any);
+          if (error) throw error;
+          inserted += batch.length;
+          updated[i] = { ...updated[i], insertedCount: inserted };
+          setFiles([...updated]);
+        }
+
+        updated[i] = { ...updated[i], status: 'done', insertedCount: inserted };
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
         setFiles([...updated]);
       } catch (err: any) {
         updated[i] = { ...updated[i], status: 'error', error: err?.message || 'Upload failed' };
@@ -172,6 +311,17 @@ export default function DataUpload() {
       }
     }
 
+<<<<<<< HEAD
+=======
+    if (uploadType === 'cdr') {
+      toast({ title: 'Running auto-analysis...', description: 'Detecting patterns in uploaded data' });
+      try {
+        const analysisResults = await runAutoAnalysis(selectedCase);
+        toast({ title: 'Analysis complete', description: `${analysisResults.length} insights generated` });
+      } catch { /* ignore */ }
+    }
+
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
     const totalInserted = updated.reduce((s, e) => s + e.insertedCount, 0);
     const doneCount = updated.filter(e => e.status === 'done').length;
     toast({ title: 'Import complete', description: `${doneCount}/${updated.length} files — ${totalInserted} records` });
@@ -185,8 +335,12 @@ export default function DataUpload() {
   const removeFile = (idx: number) => setFiles(prev => prev.filter((_, i) => i !== idx));
   const reset = () => {
     setFiles([]); setStep('select'); setDuplicateWarning(null);
+<<<<<<< HEAD
     setProcurement({ period_from: '', period_to: '', notes: '' });
     setFileMapping({});
+=======
+    setProcurement({ phone_number: '', operator_name: '', request_ref_no: '', period_from: '', period_to: '', notes: '' });
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -245,8 +399,13 @@ export default function DataUpload() {
   const totalInserted = files.reduce((s, e) => s + e.insertedCount, 0);
   const readyCount = files.filter(e => e.status === 'ready').length;
   const mappedCount = files.filter(e => Object.keys(e.mapping).length > 0).length;
+<<<<<<< HEAD
   const stepLabels = ['Procurement Info', 'Select Files', 'Review & Name', 'Processing', 'Done', 'Mapping'];
   const stepKeys = ['procurement', 'select', 'review', 'processing', 'done', 'mapping'];
+=======
+  const stepLabels = ['Procurement Info', 'Select Files', 'Review & Name', 'Processing', 'Done'];
+  const stepKeys = ['procurement', 'select', 'review', 'processing', 'done'];
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -316,6 +475,23 @@ export default function DataUpload() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
+<<<<<<< HEAD
+=======
+                <Label>Phone Number</Label>
+                <Input value={procurement.phone_number} onChange={e => setProcurement(p => ({ ...p, phone_number: e.target.value }))} placeholder="e.g. 7568191111" />
+              </div>
+              <div className="space-y-2">
+                <Label>Operator Name</Label>
+                <Input value={procurement.operator_name} onChange={e => setProcurement(p => ({ ...p, operator_name: e.target.value }))} placeholder="e.g. Jio, Airtel" />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label>Request Ref No.</Label>
+                <Input value={procurement.request_ref_no} onChange={e => setProcurement(p => ({ ...p, request_ref_no: e.target.value }))} placeholder="Reference number" />
+              </div>
+              <div className="space-y-2">
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
                 <Label>Period From</Label>
                 <Input type="date" value={procurement.period_from} onChange={e => setProcurement(p => ({ ...p, period_from: e.target.value }))} />
               </div>

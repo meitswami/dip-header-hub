@@ -40,7 +40,11 @@ A comprehensive offline-first forensic investigation platform built for law enfo
 - **System Settings** — Configure Ollama AI URL/model, test connections, and monitor system health (Database, Ollama, Storage)
 
 ### Platform
+<<<<<<< HEAD
 - **Fully Offline** — Runs locally (FastAPI + SQLite), no internet required
+=======
+- **Fully Offline** — Runs on local infrastructure with Docker, no internet required
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
 - **Dark Mode** — Full dark/light theme toggle optimized for long investigation sessions
 - **Bilingual Support** — English and Hindi language toggle
 - **Mobile Responsive** — Optimized for tablets and mobile devices for field use
@@ -53,7 +57,11 @@ A comprehensive offline-first forensic investigation platform built for law enfo
 - **UI:** Tailwind CSS + shadcn/ui + Radix UI primitives
 - **Charts:** Recharts
 - **Maps:** Leaflet + React-Leaflet + Leaflet.heat (OpenStreetMap)
+<<<<<<< HEAD
 - **Backend:** Python FastAPI + SQLAlchemy (SQLite by default; PostgreSQL optional)
+=======
+- **Backend:** Self-hosted Supabase (PostgreSQL + Auth + Storage + Edge Functions) via Docker
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
 - **AI:** Ollama (local LLM — phi3:mini, gemma:2b, or llava:7b for OCR)
 - **PDF:** jsPDF + jspdf-autotable
 - **Excel:** SheetJS (xlsx)
@@ -120,6 +128,7 @@ src/
 ## 🚀 Getting Started (Offline)
 
 ### Prerequisites
+<<<<<<< HEAD
 
 | Tool | Purpose | Install |
 |------|---------|---------|
@@ -146,6 +155,72 @@ Package DIP as a standalone desktop application using `electron-builder`.
 npm run build
 ```
 
+=======
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| **Docker Desktop** | Runs database, auth, storage | [docker.com](https://www.docker.com/products/docker-desktop) |
+| **Ollama** | Local AI engine | [ollama.com](https://ollama.com) |
+| **Node.js 18+** | Frontend build | [nodejs.org](https://nodejs.org) |
+
+### Quick Start
+
+```bash
+# 1. Clone the repository
+git clone <YOUR_GIT_URL>
+cd <YOUR_PROJECT_NAME>
+
+# 2. Run the automated setup (starts Docker services + pulls AI model)
+chmod +x setup-local.sh
+./setup-local.sh
+
+# 3. Access the app
+open http://localhost:8080
+```
+
+### Manual Setup
+
+```bash
+# Install dependencies
+npm install
+
+# Start local Supabase
+supabase start
+
+# Pull AI model
+ollama pull phi3:mini
+
+# Start Ollama
+ollama serve
+
+# Create .env from template
+cp .env.example .env
+# Edit with values from `supabase status`
+
+# Start dev server
+npm run dev
+```
+
+### RAM Budget (8GB System)
+
+| Service | RAM Usage |
+|---------|-----------|
+| PostgreSQL + Auth + Storage | ~2 GB |
+| Ollama (phi3:mini) | ~2-3 GB |
+| Browser / Electron App | ~1-2 GB |
+| **Total** | **~5-7 GB** ✅ |
+
+## 📦 Electron Packaging (Desktop App)
+
+Package DIP as a standalone desktop application using `electron-builder`.
+
+### Step 1: Build the Web App
+
+```bash
+npm run build
+```
+
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
 This creates a `dist/` folder with the production-ready static files.
 
 ### Step 2: Create Electron Entry Point
@@ -255,10 +330,31 @@ The installer will be in the `release/` folder.
 
 For a fully self-contained offline setup, ship with:
 
+<<<<<<< HEAD
 1. **Python installer** (or Miniconda)
 2. **Node.js installer**
 3. **Ollama installer** + pre-downloaded model files (optional)
 4. **DIP Electron installer** (from `release/`) or the repo + `start.bat`
+=======
+1. **Docker Desktop installer** (or Podman)
+2. **Ollama installer** + pre-downloaded model files
+3. **DIP Electron installer** (from `release/`)
+4. **`setup-local.sh`** script for first-time setup
+
+Create a deployment folder:
+
+```
+DIP-Offline-Bundle/
+├── installers/
+│   ├── DockerDesktop-Installer.exe
+│   └── OllamaSetup.exe
+├── models/
+│   └── phi3-mini.gguf          # Pre-downloaded model
+├── DIP-Setup.exe               # Electron installer
+├── docker-compose.yml          # Backend services
+└── INSTALL.md                  # Step-by-step guide
+```
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
 
 ### Electron + Backend Architecture
 
@@ -270,10 +366,20 @@ For a fully self-contained offline setup, ship with:
 │  └───────────┬───────────────────┘  │
 │              │ HTTP                  │
 │  ┌───────────▼───────────────────┐  │
+<<<<<<< HEAD
 │  │  FastAPI Backend (port 8000)  │  │
 │  │  └── SQLite (dip.db)          │  │
 │  └───────────────────────────────┘  │
 │              │ HTTP (optional)       │
+=======
+│  │  Local Supabase (Docker)      │  │
+│  │  ├── PostgreSQL (port 54322)  │  │
+│  │  ├── Auth/GoTrue (port 54321) │  │
+│  │  ├── Storage (port 54321)     │  │
+│  │  └── Edge Functions           │  │
+│  └───────────────────────────────┘  │
+│              │ HTTP                  │
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
 │  ┌───────────▼───────────────────┐  │
 │  │  Ollama (port 11434)          │  │
 │  │  └── phi3:mini / gemma:2b     │  │

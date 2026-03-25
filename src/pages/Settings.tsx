@@ -1,5 +1,9 @@
 import { useState } from 'react';
+<<<<<<< HEAD
 import { useOllamaSettings, getOllamaFetchBase } from '@/hooks/useOllamaSettings';
+=======
+import { useOllamaSettings } from '@/hooks/useOllamaSettings';
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
 import { useHealthCheck, ServiceStatus } from '@/hooks/useHealthCheck';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -45,8 +49,12 @@ export default function Settings() {
     setTestResult(null);
     try {
       const cleanUrl = url.replace(/\/+$/, '');
+<<<<<<< HEAD
       const fetchBase = getOllamaFetchBase(cleanUrl);
       const res = await fetch(`${fetchBase}/api/tags`, { signal: AbortSignal.timeout(8000) });
+=======
+      const res = await fetch(`${cleanUrl}/api/tags`, { signal: AbortSignal.timeout(8000) });
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const models: string[] = (data.models || []).map((m: any) => m.name || m.model);

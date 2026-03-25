@@ -15,6 +15,11 @@ type Alias = {
   id: string;
   phone_number: string;
   alias_name: string;
+<<<<<<< HEAD
+=======
+  confidence: string | null;
+  photo_url: string | null;
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
 };
 
 export default function AliasManager({ caseId }: Props) {

@@ -1,12 +1,19 @@
 import { useEffect, useState } from 'react';
+<<<<<<< HEAD
 import { api } from '@/lib/api';
+=======
+import { supabase } from '@/integrations/supabase/client';
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+<<<<<<< HEAD
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
+=======
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
 import { Loader2, Search, AlertTriangle } from 'lucide-react';
 
 interface CommonNumber {
@@ -22,6 +29,7 @@ export default function CrossCDRCommonNumbers({ caseId }: { caseId: string }) {
   const [minFiles, setMinFiles] = useState('3');
   const [totalFiles, setTotalFiles] = useState(0);
   const [analyzed, setAnalyzed] = useState(false);
+<<<<<<< HEAD
   const [fileNameById, setFileNameById] = useState<Record<string, string>>({});
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailNumber, setDetailNumber] = useState<string | null>(null);
@@ -54,11 +62,14 @@ export default function CrossCDRCommonNumbers({ caseId }: { caseId: string }) {
     'toc',
     'connection_type',
   ]);
+=======
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
 
   async function analyze() {
     setLoading(true);
     setAnalyzed(true);
 
+<<<<<<< HEAD
     const threshold = parseInt(minFiles);
     try {
       const res = await api.getCommonNumbers(caseId, threshold);
@@ -87,6 +98,75 @@ export default function CrossCDRCommonNumbers({ caseId }: { caseId: string }) {
       setDetailRecords([]);
     }
     setDetailLoading(false);
+=======
+    // Get all evidence files for this case (CDR type)
+    const { data: files } = await supabase
+      .from('evidence_logs')
+      .select('id, file_name')
+      .eq('case_id', caseId)
+      .in('upload_type', ['cdr', 'tower_dump']);
+
+    if (!files?.length) {
+      setResults([]);
+      setTotalFiles(0);
+      setLoading(false);
+      return;
+    }
+
+    setTotalFiles(files.length);
+    const fileMap = new Map(files.map(f => [f.id, f.file_name]));
+    const fileIds = files.map(f => f.id);
+
+    // Fetch CDR records with file_id
+    const { data: cdrRecords } = await supabase
+      .from('cdr_records')
+      .select('calling_number, called_number, file_id')
+      .eq('case_id', caseId)
+      .in('file_id', fileIds)
+      .limit(10000);
+
+    // Fetch tower dump records with file_id
+    const { data: tdRecords } = await supabase
+      .from('tower_dump_records')
+      .select('mobile_number, file_id')
+      .eq('case_id', caseId)
+      .in('file_id', fileIds)
+      .limit(10000);
+
+    // Build number → set of file_ids
+    const numberFiles: Record<string, Set<string>> = {};
+    const numberCalls: Record<string, number> = {};
+
+    for (const r of (cdrRecords || [])) {
+      for (const num of [r.calling_number, r.called_number]) {
+        if (!num || !r.file_id) continue;
+        if (!numberFiles[num]) { numberFiles[num] = new Set(); numberCalls[num] = 0; }
+        numberFiles[num].add(r.file_id);
+        numberCalls[num]++;
+      }
+    }
+
+    for (const r of (tdRecords || [])) {
+      if (!r.mobile_number || !r.file_id) continue;
+      if (!numberFiles[r.mobile_number]) { numberFiles[r.mobile_number] = new Set(); numberCalls[r.mobile_number] = 0; }
+      numberFiles[r.mobile_number].add(r.file_id);
+      numberCalls[r.mobile_number]++;
+    }
+
+    const threshold = parseInt(minFiles);
+    const common: CommonNumber[] = Object.entries(numberFiles)
+      .filter(([_, fileSet]) => fileSet.size >= threshold)
+      .map(([number, fileSet]) => ({
+        number,
+        fileCount: fileSet.size,
+        fileNames: Array.from(fileSet).map(fid => fileMap.get(fid) || fid),
+        totalCalls: numberCalls[number] || 0,
+      }))
+      .sort((a, b) => b.fileCount - a.fileCount || b.totalCalls - a.totalCalls);
+
+    setResults(common);
+    setLoading(false);
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
   }
 
   return (
@@ -150,6 +230,7 @@ export default function CrossCDRCommonNumbers({ caseId }: { caseId: string }) {
                   {results.map((r, i) => (
                     <TableRow key={r.number}>
                       <TableCell className="text-muted-foreground text-xs">{i + 1}</TableCell>
+<<<<<<< HEAD
                       <TableCell className="font-mono text-sm font-medium">
                         <Button
                           variant="link"
@@ -159,6 +240,9 @@ export default function CrossCDRCommonNumbers({ caseId }: { caseId: string }) {
                           {r.number}
                         </Button>
                       </TableCell>
+=======
+                      <TableCell className="font-mono text-sm font-medium">{r.number}</TableCell>
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
                       <TableCell className="text-center">
                         <Badge variant={r.fileCount >= 5 ? 'destructive' : 'secondary'}>{r.fileCount}</Badge>
                       </TableCell>
@@ -181,6 +265,7 @@ export default function CrossCDRCommonNumbers({ caseId }: { caseId: string }) {
           </>
         )}
       </CardContent>
+<<<<<<< HEAD
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="max-w-4xl">
           <DialogHeader>
@@ -318,6 +403,8 @@ export default function CrossCDRCommonNumbers({ caseId }: { caseId: string }) {
           )}
         </DialogContent>
       </Dialog>
+=======
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
     </Card>
   );
 }

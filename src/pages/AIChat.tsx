@@ -120,6 +120,7 @@ export default function AIChat() {
   useEffect(() => {
     if (!selectedCase) { setMessages([]); return; }
     setHistoryLoading(true);
+<<<<<<< HEAD
     api.getChatLogs(selectedCase)
       .then(data => {
         if (data?.length) {
@@ -127,6 +128,19 @@ export default function AIChat() {
             role: d.role as 'user' | 'assistant',
             content: d.content,
             timestamp: d.created_at ? new Date(d.created_at) : new Date(),
+=======
+    supabase
+      .from('chat_logs')
+      .select('content, role, created_at')
+      .eq('case_id', selectedCase)
+      .order('created_at', { ascending: true })
+      .then(({ data }) => {
+        if (data?.length) {
+          setMessages(data.map((d: any) => ({
+            role: d.role as 'user' | 'assistant',
+            content: d.content,
+            timestamp: new Date(d.created_at),
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
           })));
         } else {
           setMessages([]);
@@ -298,9 +312,16 @@ export default function AIChat() {
     setQuickSuggestions(suggestions.slice(0, 3));
 
     try {
+<<<<<<< HEAD
       const chatPayload = newMessages.map(m => ({ role: m.role, content: m.content }));
 
       const resp = await fetch('http://localhost:8000/chat', {
+=======
+      const ollamaRaw = localStorage.getItem('dip-ollama-settings');
+      const ollamaSettings = ollamaRaw ? JSON.parse(ollamaRaw) : {};
+      const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-chat`;
+      const resp = await fetch(CHAT_URL, {
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
         method: 'POST',
         signal: abortControllerRef.current?.signal,
         headers: {
@@ -308,8 +329,13 @@ export default function AIChat() {
         },
         body: JSON.stringify({
           caseId: selectedCase,
+<<<<<<< HEAD
           messages: chatPayload,
           styleLevel,
+=======
+          ollamaUrl: ollamaSettings.url,
+          ollamaModel: ollamaSettings.model,
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
         }),
       });
 
@@ -321,8 +347,22 @@ export default function AIChat() {
         setMessages(prev => [...prev, { role: 'assistant', content, timestamp: new Date() }]);
         if (autoSpeak && content) tts.speak(content);
       }
+<<<<<<< HEAD
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: 'AI service unavailable. Try again.', timestamp: new Date() }]);
+=======
+
+      if (autoSpeak && assistantSoFar) tts.speak(assistantSoFar);
+
+      if (user && assistantSoFar) {
+        await supabase.from('chat_logs').insert([
+          { case_id: selectedCase, user_id: user.id, content: userMsg.content, role: 'user' },
+          { case_id: selectedCase, user_id: user.id, content: assistantSoFar, role: 'assistant' },
+        ] as any);
+      }
+    } catch (err: any) {
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Error: ' + (err.message || 'Failed to get response'), timestamp: new Date() }]);
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
     } finally {
       setLoading(false);
     }

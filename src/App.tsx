@@ -58,7 +58,10 @@ function AppRoutes() {
       <Route path="/cases" element={<RequireAuth><Cases /></RequireAuth>} />
       <Route path="/cases/new" element={<RequireAuth><NewCase /></RequireAuth>} />
       <Route path="/cases/:id" element={<RequireAuth><CaseDetail /></RequireAuth>} />
+<<<<<<< HEAD
       <Route path="/cases/:id/edit" element={<RequireAuth><CaseEdit /></RequireAuth>} />
+=======
+>>>>>>> 190780503942b273a628c5916becb363ed820f3a
       <Route path="/cases/:id/records" element={<RequireAuth><CaseRecords /></RequireAuth>} />
       <Route path="/upload" element={<RequireAuth><RequireModule moduleKey="data_upload"><DataUpload /></RequireModule></RequireAuth>} />
       <Route path="/chat" element={<RequireAuth><RequireModule moduleKey="ai_chat"><AIChat /></RequireModule></RequireAuth>} />

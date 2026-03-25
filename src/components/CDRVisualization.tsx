@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Loader2, BarChart3, MapPin, Network } from 'lucide-react';
@@ -32,17 +32,12 @@ export default function CDRVisualization({ caseId }: CDRVisualizationProps) {
 
   async function loadData() {
     setLoading(true);
-    const { data: cdrRecords } = await supabase
-      .from('cdr_records')
-      .select('*')
-      .eq('case_id', caseId)
-      .order('call_date', { ascending: true })
-      .limit(1000);
-
-    if (!cdrRecords || cdrRecords.length === 0) {
-      setLoading(false);
-      return;
-    }
+    try {
+      const cdrRecords = await api.getCaseCdr(caseId, 1000);
+      if (!cdrRecords?.length) {
+        setLoading(false);
+        return;
+      }
 
     // Call frequency timeline (by date)
     const dateMap: Record<string, { date: string; incoming: number; outgoing: number; total: number }> = {};
@@ -88,11 +83,11 @@ export default function CDRVisualization({ caseId }: CDRVisualizationProps) {
 
     // Tower location scatter
     const towers = cdrRecords
-      .filter(r => r.lat && r.lng)
+      .filter(r => r.tower_lat && r.tower_lng)
       .map(r => ({
-        lat: r.lat,
-        lng: r.lng,
-        location: r.location || `${r.lat?.toFixed(4)}, ${r.lng?.toFixed(4)}`,
+        lat: r.tower_lat!,
+        lng: r.tower_lng!,
+        location: r.tower_location || `${r.tower_lat?.toFixed(4)}, ${r.tower_lng?.toFixed(4)}`,
         count: 1,
       }));
     // Aggregate by approximate location
@@ -103,7 +98,12 @@ export default function CDRVisualization({ caseId }: CDRVisualizationProps) {
       else towerMap[key].count++;
     });
     setTowerData(Object.values(towerMap));
-
+    } catch {
+      setTimelineData([]);
+      setContactData([]);
+      setHourlyData([]);
+      setTowerData([]);
+    }
     setLoading(false);
   }
 

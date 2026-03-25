@@ -17,7 +17,7 @@ const translations: Record<string, Record<Lang, string>> = {
   'nav.navigation': { en: 'Navigation', hi: 'नेविगेशन' },
   'nav.admin': { en: 'Administration', hi: 'प्रशासन' },
   'nav.signout': { en: 'Sign Out', hi: 'साइन आउट' },
-  'nav.platform': { en: 'Investigation Platform', hi: 'जांच मंच' },
+  'nav.platform': { en: 'Digital Investigation Platform', hi: 'डिजिटल जांच मंच' },
 
   // Dashboard
   'dash.title': { en: 'Dashboard', hi: 'डैशबोर्ड' },

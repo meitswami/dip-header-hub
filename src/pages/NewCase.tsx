@@ -1,45 +1,42 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/hooks/useAuth';
+import { api } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
 
 export default function NewCase() {
-  const { user } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
     title: '', fir_number: '', sections: '', complainant: '', accused: '', description: '',
-    case_date: '',
+    case_date: '', status: 'open',
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!form.title.trim()) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase.from('cases').insert({
-        ...form,
-        case_date: form.case_date || null,
-        created_by: user.id,
-      }).select('id').single();
-
-      if (error) throw error;
-
-      // Auto-assign creator
-      await supabase.from('case_assignments').insert({ case_id: data.id, user_id: user.id });
-
+      const data = await api.createCase({
+        title: form.title.trim(),
+        fir_number: form.fir_number || undefined,
+        sections: form.sections || undefined,
+        status: form.status,
+        complainant: form.complainant || undefined,
+        accused: form.accused || undefined,
+        description: form.description || undefined,
+        case_date: form.case_date || undefined,
+      });
       toast({ title: 'Case created successfully' });
       navigate(`/cases/${data.id}`);
     } catch (err: any) {
-      toast({ title: 'Error creating case', description: err.message, variant: 'destructive' });
+      toast({ title: 'Error creating case', description: err?.message || 'Failed', variant: 'destructive' });
     } finally {
       setLoading(false);
     }

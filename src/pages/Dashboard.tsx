@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { useLang } from '@/hooks/useLang';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,8 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
-  FolderOpen, Upload, MessageSquare, AlertTriangle,
-  Search, Plus, Clock, Shield, TrendingUp
+  FolderOpen, Upload, MessageSquare,
+  Search, Plus, Shield
 } from 'lucide-react';
 
 interface CaseSummary {
@@ -24,27 +24,21 @@ export default function Dashboard() {
   const { user, role, profile } = useAuth();
   const { t } = useLang();
   const [cases, setCases] = useState<CaseSummary[]>([]);
-  const [stats, setStats] = useState({ total: 0, active: 0, pending: 0 });
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
-      const { data } = await supabase
-        .from('cases')
-        .select('id, title, fir_number, status, created_at')
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      if (data) {
-        setCases(data);
-        setStats({
-          total: data.length,
-          active: data.filter(c => c.status === 'active').length,
-          pending: data.filter(c => c.status === 'pending').length,
-        });
+      try {
+        const all = await api.getCases();
+        // Sort newest first in case backend ordering changes, and take top 10 for the dashboard
+        const sorted = [...all].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+        setCases(sorted.slice(0, 10) as CaseSummary[]);
+      } catch {
+        setCases([]);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     }
     load();
   }, []);
@@ -77,27 +71,6 @@ export default function Dashboard() {
             <Link to="/cases/new"><Plus className="mr-2 h-4 w-4" /> {t('dash.new_case')}</Link>
           </Button>
         )}
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-4">
-        {[
-          { label: t('dash.total'), value: stats.total, icon: FolderOpen, color: 'text-primary' },
-          { label: t('dash.active'), value: stats.active, icon: TrendingUp, color: 'text-success' },
-          { label: t('dash.pending'), value: stats.pending, icon: Clock, color: 'text-warning' },
-          { label: t('dash.alerts'), value: 0, icon: AlertTriangle, color: 'text-destructive' },
-        ].map(stat => (
-          <Card key={stat.label}>
-            <CardContent className="p-4 flex items-center gap-4">
-              <div className={`p-2 rounded-lg bg-muted ${stat.color}`}>
-                <stat.icon className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{stat.value}</p>
-                <p className="text-xs text-muted-foreground">{stat.label}</p>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">

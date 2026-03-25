@@ -106,13 +106,18 @@ export default function DataCleanup() {
           }
           deleteResults.push({ key, count: data?.length || 0 });
         } else {
-          // For case-scoped tables, get all user's cases first
-          const { data: userCases } = await supabase.from('cases').select('id').eq('created_by', user.id);
-          const caseIds = (userCases || []).map(c => c.id);
+          // Get all cases the user can access (RLS limits to cases they're a member of)
+          const { data: accessibleCases } = await supabase.from('cases').select('id');
+          const caseIds = (accessibleCases || []).map((c: { id: string }) => c.id);
           if (caseIds.length > 0) {
-            const { data } = await supabase.from(key as any).select('id', { count: 'exact', head: true }).in('case_id', caseIds);
-            await supabase.from(key as any).delete().in('case_id', caseIds);
-            deleteResults.push({ key, count: (data as any) || 0 });
+            const { count } = await supabase.from(key as any).select('*', { count: 'exact', head: true }).in('case_id', caseIds);
+            const { error } = await supabase.from(key as any).delete().in('case_id', caseIds);
+            deleteResults.push({ key, count: error ? -1 : (count ?? 0) });
+            // When deleting record tables, also remove matching evidence_logs so file list matches and user can re-upload
+            if (key === 'cdr_records' || key === 'ipdr_records' || key === 'tower_dump_records' || key === 'sdr_records') {
+              const uploadType = key === 'cdr_records' ? 'cdr' : key === 'ipdr_records' ? 'ipdr' : key === 'tower_dump_records' ? 'tower_dump' : 'sdr';
+              await supabase.from('evidence_logs').delete().eq('upload_type', uploadType).in('case_id', caseIds);
+            }
           } else {
             deleteResults.push({ key, count: 0 });
           }

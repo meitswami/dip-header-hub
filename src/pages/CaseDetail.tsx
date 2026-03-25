@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,10 @@ import TowerMap from '@/components/TowerMap';
 import CaseNotes from '@/components/CaseNotes';
 import CaseDocumentManager from '@/components/CaseDocumentManager';
 import PersonProfileManager from '@/components/PersonProfileManager';
+import CaseDataSummary from '@/components/CaseDataSummary';
+import CrossCDRCommonNumbers from '@/components/CrossCDRCommonNumbers';
+import CaseTeamManager from '@/components/CaseTeamManager';
+import DataAssignmentPanel from '@/components/DataAssignmentPanel';
 
 export default function CaseDetail() {
   const { id } = useParams<{ id: string }>();
@@ -33,24 +37,17 @@ export default function CaseDetail() {
 
   useEffect(() => {
     if (!id) return;
-    async function load() {
-      const [caseRes, cdrFiles, ipdrFiles, towerFiles, sdrFiles, insightRes] = await Promise.all([
-        supabase.from('cases').select('*').eq('id', id).single(),
-        supabase.from('evidence_logs').select('id', { count: 'exact', head: true }).eq('case_id', id).eq('upload_type', 'cdr'),
-        supabase.from('evidence_logs').select('id', { count: 'exact', head: true }).eq('case_id', id).eq('upload_type', 'ipdr'),
-        supabase.from('evidence_logs').select('id', { count: 'exact', head: true }).eq('case_id', id).eq('upload_type', 'tower_dump'),
-        supabase.from('evidence_logs').select('id', { count: 'exact', head: true }).eq('case_id', id).eq('upload_type', 'sdr'),
-        supabase.from('investigation_insights').select('*').eq('case_id', id).order('created_at', { ascending: false }).limit(5),
-      ]);
-      if (caseRes.data) setCaseData(caseRes.data);
-      setCdrFileCount(cdrFiles.count || 0);
-      setIpdrFileCount(ipdrFiles.count || 0);
-      setTowerFileCount(towerFiles.count || 0);
-      setSdrFileCount(sdrFiles.count || 0);
-      if (insightRes.data) setInsights(insightRes.data);
-      setLoading(false);
-    }
-    load();
+    Promise.all([api.getCase(id), api.getCaseStats(id)])
+      .then(([caseRes, stats]) => {
+        setCaseData(caseRes);
+        setCdrFileCount(stats.cdr_count);
+        setIpdrFileCount(stats.ipdr_count);
+        setTowerFileCount(stats.tower_count);
+        setSdrFileCount(stats.sdr_count);
+        setInsights([]);
+      })
+      .catch(() => setCaseData(null))
+      .finally(() => setLoading(false));
   }, [id]);
 
   if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
@@ -101,6 +98,9 @@ export default function CaseDetail() {
         ))}
       </div>
 
+      {/* Data Summary */}
+      <CaseDataSummary caseId={id!} />
+
       {/* Case Notes */}
       <CaseNotes caseId={id!} />
 
@@ -109,6 +109,12 @@ export default function CaseDetail() {
 
       {/* Persons */}
       <PersonProfileManager caseId={id!} />
+
+      {/* Case Team */}
+      <CaseTeamManager caseId={id!} />
+
+      {/* Data Access Assignments */}
+      <DataAssignmentPanel caseId={id!} />
 
       {/* AI Training Panel + Alias Manager */}
       <div className="grid gap-4 md:grid-cols-2">
@@ -144,7 +150,10 @@ export default function CaseDetail() {
           <CDRVisualization caseId={id!} />
         </TabsContent>
         <TabsContent value="common">
-          <CommonNumberAnalysis caseId={id!} />
+          <div className="space-y-4">
+            <CrossCDRCommonNumbers caseId={id!} />
+            <CommonNumberAnalysis caseId={id!} />
+          </div>
         </TabsContent>
         <TabsContent value="timeline">
           <TimelineReconstruction caseId={id!} />

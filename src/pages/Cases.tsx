@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -17,18 +17,13 @@ export default function Cases() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function load() {
-      let query = supabase.from('cases').select('*').order('created_at', { ascending: false });
-      if (statusFilter !== 'all') query = query.eq('status', statusFilter as any);
-      const { data } = await query;
-      if (data) setCases(data);
-      setLoading(false);
-    }
-    load();
-  }, [statusFilter]);
+    api.getCases().then(data => { setCases(data); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
 
-  const filtered = cases.filter(c =>
-    c.title.toLowerCase().includes(search.toLowerCase()) ||
+  const byStatus = statusFilter === 'all' ? cases : cases.filter(c => c.status === statusFilter);
+
+  const filtered = byStatus.filter(c =>
+    c.title?.toLowerCase().includes(search.toLowerCase()) ||
     c.fir_number?.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -45,7 +40,9 @@ export default function Cases() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-tight">Cases</h1>
+        <h1 className="text-2xl font-bold tracking-tight">
+          Cases ({filtered.length})
+        </h1>
         {(role === 'admin' || role === 'investigator') && (
           <Button asChild><Link to="/cases/new"><Plus className="mr-2 h-4 w-4" /> New Case</Link></Button>
         )}
@@ -73,28 +70,70 @@ export default function Cases() {
       ) : filtered.length === 0 ? (
         <Card><CardContent className="py-12 text-center text-muted-foreground"><FolderOpen className="h-12 w-12 mx-auto mb-3 opacity-40" /><p>No cases found</p></CardContent></Card>
       ) : (
-        <div className="grid gap-3">
-          {filtered.map(c => (
-            <Link key={c.id} to={`/cases/${c.id}`}>
-              <Card className="hover:border-primary/50 transition-colors">
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between">
-                    <div className="space-y-1">
-                      <h3 className="font-semibold">{c.title}</h3>
-                      <div className="flex gap-4 text-xs text-muted-foreground">
-                        {c.fir_number && <span>FIR: {c.fir_number}</span>}
-                        {c.sections && <span>Sections: {c.sections}</span>}
-                        <span>{new Date(c.created_at).toLocaleDateString()}</span>
-                      </div>
-                      {c.description && <p className="text-sm text-muted-foreground line-clamp-1 mt-1">{c.description}</p>}
-                    </div>
-                    <Badge variant="outline" className={statusColor(c.status)}>{c.status}</Badge>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
-        </div>
+        <Card>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/60">
+                  <tr className="border-b">
+                    <th className="px-4 py-2 text-left w-14">Sr. No.</th>
+                    <th className="px-4 py-2 text-left">Case Title</th>
+                    <th className="px-4 py-2 text-left">FIR No.</th>
+                    <th className="px-4 py-2 text-left">Sections</th>
+                    <th className="px-4 py-2 text-left">Created On</th>
+                    <th className="px-4 py-2 text-left">Status</th>
+                    <th className="px-4 py-2 text-left w-40">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((c, idx) => (
+                    <tr key={c.id} className="border-b hover:bg-muted/40">
+                      <td className="px-4 py-2 align-middle text-xs text-muted-foreground">
+                        {idx + 1}
+                      </td>
+                      <td className="px-4 py-2 align-middle">
+                        <div className="flex flex-col">
+                          <span className="font-medium">{c.title}</span>
+                          {c.description && (
+                            <span className="text-xs text-muted-foreground line-clamp-1">
+                              {c.description}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-2 align-middle text-xs">
+                        {c.fir_number || '—'}
+                      </td>
+                      <td className="px-4 py-2 align-middle text-xs">
+                        {c.sections || '—'}
+                      </td>
+                      <td className="px-4 py-2 align-middle text-xs">
+                        {new Date(c.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="px-4 py-2 align-middle">
+                        <Badge variant="outline" className={statusColor(c.status)}>
+                          {c.status}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-2 align-middle">
+                        <div className="flex gap-2">
+                          <Button asChild size="xs" variant="outline">
+                            <Link to={`/cases/${c.id}`}>View</Link>
+                          </Button>
+                          {(role === 'admin' || role === 'investigator') && (
+                            <Button asChild size="xs" variant="ghost">
+                              <Link to={`/cases/${c.id}/edit`}>Edit</Link>
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

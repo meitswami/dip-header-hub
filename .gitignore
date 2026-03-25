@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local databases
+dip.db
+backend/dip.db
+*.db

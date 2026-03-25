@@ -330,8 +330,8 @@ export default function Reports() {
         doc.setFontSize(7);
         doc.setFont('helvetica', 'normal');
         const footer = courtFormat
-          ? `Page ${i} of ${pageCount} | Certificate: CERT-${caseData.id.slice(0, 8).toUpperCase()} | ${new Date().toLocaleDateString('en-IN')} | COURT DOCUMENT`
-          : `Page ${i} of ${pageCount} | Report ID: ${caseData.id.slice(0, 8)} | Generated: ${new Date().toLocaleString()} | CONFIDENTIAL`;
+          ? `Page ${i} of ${pageCount} | Certificate: CERT-${caseData.id.slice(0, 8).toUpperCase()} | ${new Date().toLocaleDateString('en-IN')} | Digital Investigation Platform — Meit Swami | COURT DOCUMENT`
+          : `Page ${i} of ${pageCount} | Report ID: ${caseData.id.slice(0, 8)} | Generated: ${new Date().toLocaleString()} | Digital Investigation Platform — Meit Swami | CONFIDENTIAL`;
         doc.text(footer, pw / 2, ph - 10, { align: 'center' });
       }
 

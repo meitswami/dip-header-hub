@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { useSpeechToText, useTextToSpeech } from '@/hooks/useSpeech';
 import { Button } from '@/components/ui/button';
@@ -8,8 +8,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Send, Bot, User, MessageSquare, Mic, MicOff, Volume2, VolumeX, Languages, Check, CheckCheck } from 'lucide-react';
+import { Send, Bot, User, MessageSquare, Mic, MicOff, Volume2, VolumeX, Languages, Check, CheckCheck, FileSpreadsheet, Square } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
 
 type Message = { role: 'user' | 'assistant'; content: string; timestamp: Date };
 
@@ -96,38 +99,41 @@ export default function AIChat() {
   const [loading, setLoading] = useState(false);
   const [autoSpeak, setAutoSpeak] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [numberSuggestions, setNumberSuggestions] = useState<{ number: string; count: number }[]>([]);
+  const [suggestionOpen, setSuggestionOpen] = useState(false);
+  const [viewNumber, setViewNumber] = useState<string | null>(null);
+  const [viewRecords, setViewRecords] = useState<any[]>([]);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const streamAbortRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const stt = useSpeechToText();
   const tts = useTextToSpeech();
 
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [styleLevel, setStyleLevel] = useState<'simple' | 'intermediate' | 'expert'>('simple');
 
   useEffect(() => {
-    supabase.from('cases').select('id, title').order('created_at', { ascending: false })
-      .then(({ data }) => { if (data) setCases(data); });
+    api.getCases().then(data => setCases(data)).catch(() => setCases([]));
   }, []);
 
-  // Load chat history when case changes
   useEffect(() => {
     if (!selectedCase) { setMessages([]); return; }
     setHistoryLoading(true);
-    supabase
-      .from('chat_logs')
-      .select('message, role, created_at')
-      .eq('case_id', selectedCase)
-      .order('created_at', { ascending: true })
-      .then(({ data }) => {
+    api.getChatLogs(selectedCase)
+      .then(data => {
         if (data?.length) {
-          setMessages(data.map(d => ({
+          setMessages(data.map((d: { role: string; content: string; created_at: string | null }) => ({
             role: d.role as 'user' | 'assistant',
-            content: d.message,
-            timestamp: new Date(d.created_at),
+            content: d.content,
+            timestamp: d.created_at ? new Date(d.created_at) : new Date(),
           })));
         } else {
           setMessages([]);
         }
         setHistoryLoading(false);
-      });
+      })
+      .catch(() => { setMessages([]); setHistoryLoading(false); });
   }, [selectedCase]);
 
   useEffect(() => {
@@ -142,9 +148,105 @@ export default function AIChat() {
     tts.setLang(stt.lang);
   }, [stt.lang]);
 
+  const [personSuggestions, setPersonSuggestions] = useState<{ label: string; number: string }[]>([]);
+  const [triggerChar, setTriggerChar] = useState<'@' | '#' | null>(null);
+  const [triggerStart, setTriggerStart] = useState(0);
+  const [selectedNumbersForInsert, setSelectedNumbersForInsert] = useState<Set<string>>(new Set());
+  const [quickSuggestions, setQuickSuggestions] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!selectedCase || !input) {
+      setNumberSuggestions([]);
+      setPersonSuggestions([]);
+      setTriggerChar(null);
+      setSuggestionOpen(false);
+      return;
+    }
+    const lastAt = input.lastIndexOf('@');
+    const lastHash = input.lastIndexOf('#');
+    const atActive = lastAt >= 0 && (lastHash < 0 || lastAt > lastHash);
+    const hashActive = lastHash >= 0 && (lastAt < 0 || lastHash > lastAt);
+
+    if (atActive) {
+      const fragment = input.slice(lastAt + 1).split(/\s/)[0] || '';
+      setTriggerChar('@');
+      setTriggerStart(lastAt);
+      setSuggestionOpen(true);
+      setNumberSuggestions([]);
+      const t = setTimeout(async () => {
+        try {
+          const [profiles, aliases] = await Promise.all([
+            api.getPersonProfiles(selectedCase),
+            api.getAliases(selectedCase),
+          ]);
+          let list: { label: string; number: string }[] = [];
+          profiles.forEach((p: { name: string; phone_numbers: string[] }) => {
+            const nums = p.phone_numbers || [];
+            nums.forEach((num: string) => list.push({ label: p.name || num, number: String(num) }));
+          });
+          aliases.forEach((a: { alias_name: string; phone_number: string }) =>
+            list.push({ label: a.alias_name || a.phone_number, number: String(a.phone_number) })
+          );
+          const q = fragment.toLowerCase().trim();
+          if (q) list = list.filter(x => x.label.toLowerCase().includes(q));
+          setPersonSuggestions(list.slice(0, 20));
+        } catch {
+          setPersonSuggestions([]);
+        }
+      }, 200);
+      return () => clearTimeout(t);
+    }
+
+    if (hashActive) {
+      const fragment = input.slice(lastHash + 1).replace(/\s/g, '');
+      const digits = fragment.replace(/\D/g, '');
+      setTriggerChar('#');
+      setTriggerStart(lastHash);
+      setSelectedNumbersForInsert(new Set());
+      if (digits.length >= 1) {
+        const t = setTimeout(async () => {
+          try {
+            const list = await api.getNumbersSearch(selectedCase, digits);
+            setNumberSuggestions(list.map(x => ({ number: x.number, count: x.count })));
+            setPersonSuggestions([]);
+            setSuggestionOpen(list.length > 0);
+          } catch {
+            setNumberSuggestions([]);
+          }
+        }, 300);
+        return () => clearTimeout(t);
+      } else {
+        setNumberSuggestions([]);
+        setSuggestionOpen(false);
+      }
+      return;
+    }
+
+    setTriggerChar(null);
+    setNumberSuggestions([]);
+    setPersonSuggestions([]);
+    setSuggestionOpen(false);
+  }, [selectedCase, input]);
+
+  const openNumberView = async (num: string) => {
+    setViewNumber(num);
+    if (!selectedCase) return;
+    try {
+      const data = await api.getCdrSample(selectedCase, num);
+      setViewRecords(data);
+    } catch {
+      setViewRecords([]);
+    }
+  };
+
   const toggleListening = () => {
     if (stt.isListening) stt.stopListening();
     else stt.startListening();
+  };
+
+  const stopStreaming = () => {
+    streamAbortRef.current = true;
+    abortControllerRef.current?.abort();
   };
 
   const sendMessage = async () => {
@@ -156,76 +258,71 @@ export default function AIChat() {
     stt.resetTranscript();
     if (stt.isListening) stt.stopListening();
     setLoading(true);
+    streamAbortRef.current = false;
+    abortControllerRef.current = new AbortController();
+
+    // Rule-based FAQ / quick-action suggestions based on query category
+    const q = userMsg.content.toLowerCase();
+    const suggestions: string[] = [];
+    if (/common\s+contacts?|common\s+numbers?|overlap/i.test(q)) {
+      suggestions.push(
+        'Show top common contacts between two numbers in this case.',
+        'List numbers that frequently contact multiple suspects.',
+        'Identify numbers that appear across multiple CDR files.'
+      );
+    } else if (/frequency|pattern|how\s+often|daily|hourly/i.test(q)) {
+      suggestions.push(
+        'Show hourly call pattern for a specific number.',
+        'Compare day vs night call volume for the main suspect.',
+        'Find numbers with unusually high call frequency.'
+      );
+    } else if (/timeline|sequence|chronolog/i.test(q)) {
+      suggestions.push(
+        'Summarize key call events on a specific date.',
+        'Compare call timelines of two numbers on the same day.',
+        'Highlight any long gaps in activity for a suspect.'
+      );
+    } else if (/anomal(y|ies)|suspicious|unusual|irregular/i.test(q)) {
+      suggestions.push(
+        'Flag numbers with very high night-call percentage.',
+        'Find sudden spikes in calls for a number within a short period.',
+        'List numbers that suddenly stop calling after a key date.'
+      );
+    } else if (/tower|cell\s*id|location|overlap/i.test(q)) {
+      suggestions.push(
+        'Find numbers that share the same tower frequently.',
+        'Summarize most common cell IDs for the main suspect.',
+        'Check for tower overlap between two suspects on a given date.'
+      );
+    }
+    setQuickSuggestions(suggestions.slice(0, 3));
 
     try {
-      const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-chat`;
-      const resp = await fetch(CHAT_URL, {
+      const chatPayload = newMessages.map(m => ({ role: m.role, content: m.content }));
+
+      const resp = await fetch('http://localhost:8000/chat', {
         method: 'POST',
+        signal: abortControllerRef.current?.signal,
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
         body: JSON.stringify({
-          messages: newMessages.map(m => ({ role: m.role, content: m.content })),
           caseId: selectedCase,
+          messages: chatPayload,
+          styleLevel,
         }),
       });
 
-      if (!resp.ok || !resp.body) throw new Error('AI request failed');
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let textBuffer = '';
-      let assistantSoFar = '';
-      const assistantTimestamp = new Date();
-
-      const upsertAssistant = (chunk: string) => {
-        assistantSoFar += chunk;
-        setMessages(prev => {
-          const last = prev[prev.length - 1];
-          if (last?.role === 'assistant') {
-            return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: assistantSoFar } : m);
-          }
-          return [...prev, { role: 'assistant', content: assistantSoFar, timestamp: assistantTimestamp }];
-        });
-      };
-
-      let streamDone = false;
-      while (!streamDone) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        textBuffer += decoder.decode(value, { stream: true });
-
-        let newlineIndex: number;
-        while ((newlineIndex = textBuffer.indexOf('\n')) !== -1) {
-          let line = textBuffer.slice(0, newlineIndex);
-          textBuffer = textBuffer.slice(newlineIndex + 1);
-          if (line.endsWith('\r')) line = line.slice(0, -1);
-          if (line.startsWith(':') || line.trim() === '') continue;
-          if (!line.startsWith('data: ')) continue;
-          const jsonStr = line.slice(6).trim();
-          if (jsonStr === '[DONE]') { streamDone = true; break; }
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const content = parsed.choices?.[0]?.delta?.content;
-            if (content) upsertAssistant(content);
-          } catch {
-            textBuffer = line + '\n' + textBuffer;
-            break;
-          }
-        }
+      const data = await resp.json().catch(() => ({} as any));
+      if (!resp.ok || !data?.content) {
+        setMessages(prev => [...prev, { role: 'assistant', content: 'AI service unavailable. Try again.', timestamp: new Date() }]);
+      } else {
+        const content: string = data.content;
+        setMessages(prev => [...prev, { role: 'assistant', content, timestamp: new Date() }]);
+        if (autoSpeak && content) tts.speak(content);
       }
-
-      if (autoSpeak && assistantSoFar) tts.speak(assistantSoFar);
-
-      if (user && assistantSoFar) {
-        await supabase.from('chat_logs').insert([
-          { case_id: selectedCase, user_id: user.id, message: userMsg.content, role: 'user' },
-          { case_id: selectedCase, user_id: user.id, message: assistantSoFar, role: 'assistant' },
-        ]);
-      }
-    } catch (err: any) {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Error: ' + (err.message || 'Failed to get response'), timestamp: new Date() }]);
+    } catch {
+      setMessages(prev => [...prev, { role: 'assistant', content: 'AI service unavailable. Try again.', timestamp: new Date() }]);
     } finally {
       setLoading(false);
     }
@@ -247,6 +344,20 @@ export default function AIChat() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Select
+            value={styleLevel}
+            onValueChange={(v: 'simple' | 'intermediate' | 'expert') => setStyleLevel(v)}
+          >
+            <SelectTrigger className="w-40 h-8 text-xs">
+              <SelectValue placeholder="Style" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="simple">Simple</SelectItem>
+              <SelectItem value="intermediate">Intermediate talk</SelectItem>
+              <SelectItem value="expert">Expert</SelectItem>
+            </SelectContent>
+          </Select>
+
           <Select value={stt.lang} onValueChange={(v: any) => stt.setLang(v)}>
             <SelectTrigger className="w-36 h-8 text-xs">
               <Languages className="h-3.5 w-3.5 mr-1" />
@@ -349,15 +460,30 @@ export default function AIChat() {
         </ScrollArea>
       </div>
 
-      {/* Input area */}
+      {/* Input area — use @ for person/alias, # for number suggestions (only when typing) */}
       <div className="px-4 py-3 bg-card border-t border-border rounded-b-lg">
+        {quickSuggestions.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2 text-xs">
+            {quickSuggestions.map((s, idx) => (
+              <Button
+                key={idx}
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => setInput(s)}
+              >
+                {s}
+              </Button>
+            ))}
+          </div>
+        )}
         {stt.isListening && (
           <div className="flex items-center gap-2 mb-2 text-xs text-destructive animate-pulse">
             <Mic className="h-3.5 w-3.5" />
             <span>Listening... speak in {stt.LANG_OPTIONS.find(l => l.value === stt.lang)?.label}</span>
           </div>
         )}
-        <div className="flex items-end gap-2">
+        <div className="relative flex items-end gap-2">
           {stt.isSupported && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -374,25 +500,161 @@ export default function AIChat() {
               <TooltipContent>{stt.isListening ? 'Stop recording' : 'Voice input'}</TooltipContent>
             </Tooltip>
           )}
-          <Textarea
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            placeholder={selectedCase ? 'Type a message...' : 'Select a case first...'}
-            disabled={!selectedCase}
-            className="min-h-[44px] max-h-32 resize-none rounded-2xl bg-muted/50"
-            rows={1}
-            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-          />
-          <Button
-            onClick={sendMessage}
-            disabled={!input.trim() || !selectedCase || loading}
-            size="icon"
-            className="shrink-0 h-10 w-10 rounded-full"
-          >
-            <Send className="h-4 w-4" />
-          </Button>
+          <div className="flex-1 relative">
+            <Textarea
+              ref={inputRef}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              placeholder={selectedCase ? 'Use @ for person/alias, # for number...' : 'Select a case first...'}
+              disabled={!selectedCase}
+              className="min-h-[44px] max-h-32 resize-none rounded-2xl bg-muted/50"
+              rows={1}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); return; }
+                if (e.key === 'Backspace' && input.length > 0 && inputRef.current?.selectionStart === input.length) {
+                  const match = input.match(/,?\s*\d{6,}\s*$/);
+                  if (match) {
+                    e.preventDefault();
+                    setInput(input.slice(0, input.length - match[0].length));
+                  }
+                }
+              }}
+            />
+            {suggestionOpen && triggerChar === '@' && (
+              <div className="absolute bottom-full left-0 right-0 mb-1 rounded-lg border border-border bg-popover shadow-lg py-1 z-[100] max-h-48 overflow-auto">
+                <p className="px-3 py-1 text-[10px] text-muted-foreground">@ Person / alias — click to insert</p>
+                {personSuggestions.length > 0 ? (
+                  personSuggestions.map(({ label, number }) => (
+                    <button
+                      key={`${label}-${number}`}
+                      type="button"
+                      className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex justify-between items-center"
+                      onClick={() => {
+                        const before = input.slice(0, triggerStart);
+                        const frag = input.slice(triggerStart + 1).split(/\s/)[0] || '';
+                        const after = input.slice(triggerStart + 1 + frag.length);
+                        setInput(`${before}@${label} (${number}) ${after}`.trimStart());
+                        setSuggestionOpen(false);
+                        setTriggerChar(null);
+                      }}
+                    >
+                      <span>{label}</span>
+                      <span className="text-xs text-muted-foreground font-mono">{number}</span>
+                    </button>
+                  ))
+                ) : (
+                  <p className="px-3 py-2 text-xs text-muted-foreground">No persons or aliases in this case. Add from Person profiles or Data Upload → Mapping.</p>
+                )}
+              </div>
+            )}
+            {suggestionOpen && triggerChar === '#' && numberSuggestions.length > 0 && (
+              <div className="absolute bottom-full left-0 right-0 mb-1 rounded-lg border border-border bg-popover shadow-lg py-1 z-50 max-h-56 overflow-auto">
+                <p className="px-3 py-1 text-[10px] text-muted-foreground"># Numbers — tick to select multiple, then Insert. Backspace removes last number.</p>
+                {numberSuggestions.map(({ number, count }) => (
+                  <div key={number} className="flex items-center gap-2 px-3 py-2 hover:bg-muted">
+                    <input
+                      type="checkbox"
+                      checked={selectedNumbersForInsert.has(number)}
+                      onChange={() => {
+                        setSelectedNumbersForInsert(prev => {
+                          const next = new Set(prev);
+                          if (next.has(number)) next.delete(number);
+                          else next.add(number);
+                          return next;
+                        });
+                      }}
+                    />
+                    <span className="font-mono flex-1">{number}</span>
+                    <span className="text-xs text-muted-foreground">{count} rec</span>
+                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => openNumberView(number)} title="View CDR">
+                      <FileSpreadsheet className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+                <div className="border-t px-3 py-2">
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      const before = input.slice(0, triggerStart);
+                      const nums = [...selectedNumbersForInsert];
+                      const inserted = nums.length ? nums.join(', ') : '';
+                      setInput(nums.length ? `${before}${inserted} `.trimStart() : input);
+                      setSuggestionOpen(false);
+                      setTriggerChar(null);
+                      setSelectedNumbersForInsert(new Set());
+                    }}
+                  >
+                    Insert {selectedNumbersForInsert.size > 0 ? `(${selectedNumbersForInsert.size})` : ''}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+          {loading ? (
+            <Button
+              type="button"
+              variant="destructive"
+              size="icon"
+              className="shrink-0 h-10 w-10 rounded-full"
+              onClick={stopStreaming}
+              title="Stop generating"
+            >
+              <Square className="h-4 w-4" />
+            </Button>
+          ) : (
+            <Button
+              onClick={sendMessage}
+              disabled={!input.trim() || !selectedCase}
+              size="icon"
+              className="shrink-0 h-10 w-10 rounded-full"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       </div>
+
+      <Dialog open={!!viewNumber} onOpenChange={open => !open && setViewNumber(null)}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>CDR records for {viewNumber}</DialogTitle>
+          </DialogHeader>
+          <div className="overflow-auto flex-1 -mx-6 px-6">
+            <p className="text-xs text-muted-foreground mb-2">
+              <a href={selectedCase ? `/cases/${selectedCase}/records?type=cdr` : '#'} className="text-primary hover:underline">
+                View full CDR files in Case Records →
+              </a>
+            </p>
+            {viewRecords.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No records found for this number in this case.</p>
+            ) : (
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-2">Calling</th>
+                    <th className="text-left py-2">Called</th>
+                    <th className="text-left py-2">Date</th>
+                    <th className="text-left py-2">Type</th>
+                    <th className="text-left py-2">Duration</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {viewRecords.map((r, i) => (
+                    <tr key={i} className="border-b border-border/50">
+                      <td className="py-1 font-mono">{r.calling_number}</td>
+                      <td className="py-1 font-mono">{r.called_number}</td>
+                      <td className="py-1">{r.call_date || '—'}</td>
+                      <td className="py-1">{r.call_type || '—'}</td>
+                      <td className="py-1">{r.duration != null ? `${r.duration}s` : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

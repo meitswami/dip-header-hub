@@ -12,9 +12,9 @@ import { toast } from 'sonner';
 interface CaseNote {
   id: string;
   content: string;
-  note_type: string;
   created_at: string;
-  created_by: string;
+  user_id: string | null;
+  updated_at: string;
 }
 
 export default function CaseNotes({ caseId }: { caseId: string }) {
@@ -47,7 +47,7 @@ export default function CaseNotes({ caseId }: { caseId: string }) {
     const { error } = await supabase.from('case_notes').insert({
       case_id: caseId,
       content: newNote.trim(),
-      created_by: user.id,
+      user_id: user.id,
     });
     if (error) toast.error('Failed to add note');
     else {

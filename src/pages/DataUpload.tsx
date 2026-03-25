@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,13 +8,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
-import { Upload, FileSpreadsheet, Loader2, CheckCircle, AlertCircle, ArrowRight, X, Files, Phone } from 'lucide-react';
+import { Upload, FileSpreadsheet, Loader2, CheckCircle, AlertCircle, ArrowRight, X, Files, Phone, ShieldAlert } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
 import {
-  parseSpreadsheet, ParseResult, autoMapColumns, mapRowToRecord,
+  parseSpreadsheet, parseSpreadsheetBestHeaders, ParseResult, autoMapColumns,
   CDR_COLUMN_MAP, IPDR_COLUMN_MAP, SDR_COLUMN_MAP, TOWER_COLUMN_MAP,
 } from '@/lib/dataParser';
-import { runAutoAnalysis } from '@/lib/autoAnalysis';
 
 const TYPE_MAP: Record<string, { table: string; columnMap: Record<string, string[]> }> = {
   cdr: { table: 'cdr_records', columnMap: CDR_COLUMN_MAP },
@@ -23,7 +24,6 @@ const TYPE_MAP: Record<string, { table: string; columnMap: Record<string, string
   sdr: { table: 'sdr_records', columnMap: SDR_COLUMN_MAP },
 };
 
-// Extract phone number from filename like "7568191111_1.csv" or "CDR_8619922222.csv"
 function extractPhoneFromFilename(filename: string): string | null {
   const matches = filename.match(/(\d{10,15})/);
   return matches ? matches[1] : null;
@@ -40,6 +40,12 @@ interface FileEntry {
   numberLabel: string;
 }
 
+interface ProcurementMeta {
+  period_from: string;
+  period_to: string;
+  notes: string;
+}
+
 export default function DataUpload() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -49,27 +55,59 @@ export default function DataUpload() {
   const [uploadType, setUploadType] = useState('cdr');
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [step, setStep] = useState<'select' | 'review' | 'processing' | 'done'>('select');
+  const [step, setStep] = useState<'select' | 'procurement' | 'review' | 'processing' | 'done' | 'mapping'>('select');
   const [existingAliases, setExistingAliases] = useState<Record<string, string>>({});
+  const [myCaseRole, setMyCaseRole] = useState<string | null>(null);
+  const [checkingRole, setCheckingRole] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+  const [procurement, setProcurement] = useState<ProcurementMeta>({
+    period_from: '', period_to: '', notes: '',
+  });
+  const [casePersons, setCasePersons] = useState<{ id: string; name: string; phone_numbers: string[] | null }[]>([]);
+  const [fileMapping, setFileMapping] = useState<Record<number, { type: 'new_person' | 'alias' | 'existing'; nameSoFather?: string; aliasName?: string; existingPersonId?: string }>>({});
+  const [mappingSaving, setMappingSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    supabase.from('cases').select('id, title').order('created_at', { ascending: false })
-      .then(({ data }) => { if (data) setCases(data); });
+    api.getCases().then(data => setCases(data)).catch(() => setCases([]));
   }, []);
 
-  // Fetch existing aliases for the selected case
+  useEffect(() => {
+    if (!selectedCase) { setMyCaseRole(null); return; }
+    setMyCaseRole('procurement');
+  }, [selectedCase]);
+
   useEffect(() => {
     if (!selectedCase) return;
-    supabase.from('aliases').select('phone_number, alias_name').eq('case_id', selectedCase)
-      .then(({ data }) => {
-        if (data) {
-          const map: Record<string, string> = {};
-          data.forEach(a => { map[a.phone_number] = a.alias_name; });
-          setExistingAliases(map);
-        }
-      });
+    api.getAliases(selectedCase).then(data => {
+      const map: Record<string, string> = {};
+      data.forEach(a => { map[a.phone_number] = a.alias_name; });
+      setExistingAliases(map);
+    }).catch(() => {});
   }, [selectedCase]);
+
+  useEffect(() => {
+    if (selectedCase && step === 'mapping') {
+      api.getPersonProfiles(selectedCase).then(data => setCasePersons(data));
+      api.getAliases(selectedCase).then(data => {
+        const map: Record<string, string> = {};
+        data.forEach(a => { map[a.phone_number] = a.alias_name; });
+        setExistingAliases(prev => ({ ...prev, ...map }));
+      }).catch(() => {});
+    }
+  }, [selectedCase, step]);
+
+  const canUpload = !!selectedCase;
+
+  async function checkDuplicate(): Promise<boolean> {
+    setDuplicateWarning(null);
+    return false;
+  }
+
+  const handleProcurementNext = async () => {
+    await checkDuplicate();
+    setStep('select');
+  };
 
   const handleFilesSelect = async (selectedFiles: FileList) => {
     const typeConfig = TYPE_MAP[uploadType];
@@ -78,21 +116,18 @@ export default function DataUpload() {
     for (const f of Array.from(selectedFiles)) {
       const detectedNumber = extractPhoneFromFilename(f.name);
       entries.push({
-        file: f,
-        parsed: null,
-        mapping: {},
-        status: 'pending',
-        insertedCount: 0,
-        detectedNumber,
+        file: f, parsed: null, mapping: {}, status: 'pending',
+        insertedCount: 0, detectedNumber,
         numberLabel: detectedNumber ? (existingAliases[detectedNumber] || '') : '',
       });
     }
 
-    // Parse all files and auto-map columns
     for (let i = 0; i < entries.length; i++) {
       entries[i].status = 'parsing';
       try {
-        const result = await parseSpreadsheet(entries[i].file);
+        const result = uploadType === 'cdr'
+          ? await parseSpreadsheetBestHeaders(entries[i].file, typeConfig.columnMap)
+          : await parseSpreadsheet(entries[i].file);
         const autoMap = autoMapColumns(result.headers, typeConfig.columnMap);
         entries[i] = { ...entries[i], parsed: result, mapping: autoMap, status: 'ready' };
       } catch (err: any) {
@@ -105,10 +140,9 @@ export default function DataUpload() {
   };
 
   const handleProcessAll = async () => {
-    if (!selectedCase || !user) return;
+    if (!selectedCase) return;
     setUploading(true);
     setStep('processing');
-    const typeConfig = TYPE_MAP[uploadType];
     const updated = [...files];
 
     for (let i = 0; i < updated.length; i++) {
@@ -118,70 +152,24 @@ export default function DataUpload() {
       setFiles([...updated]);
 
       try {
-        // Save alias if number detected and label provided
-        if (entry.detectedNumber && entry.numberLabel && !existingAliases[entry.detectedNumber]) {
-          await supabase.from('aliases').insert({
-            case_id: selectedCase,
-            phone_number: entry.detectedNumber,
-            alias_name: entry.numberLabel,
-            created_by: user.id,
-          });
+        const result = await api.upload(selectedCase, uploadType, entry.file, {
+          period_from: procurement.period_from || undefined,
+          period_to: procurement.period_to || undefined,
+          notes: procurement.notes || undefined,
+          phone_number: entry.detectedNumber || undefined,
+          alias_name: entry.numberLabel || undefined,
+          uploaded_by: user?.id,
+        });
+        const inserted = result.inserted ?? 0;
+        updated[i] = { ...updated[i], status: 'done', insertedCount: inserted };
+        if (entry.detectedNumber && entry.numberLabel) {
           setExistingAliases(prev => ({ ...prev, [entry.detectedNumber!]: entry.numberLabel }));
         }
-
-        // SHA256 hash
-        const buffer = await entry.file.arrayBuffer();
-        const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const fileHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-        // Upload to storage
-        const filePath = `${user.id}/${selectedCase}/${Date.now()}_${entry.file.name}`;
-        const { error: storageError } = await supabase.storage.from('evidence').upload(filePath, entry.file);
-        if (storageError) throw storageError;
-        const { data: urlData } = supabase.storage.from('evidence').getPublicUrl(filePath);
-
-        // Log evidence
-        await supabase.from('evidence_logs').insert({
-          case_id: selectedCase, file_name: entry.file.name, file_hash: fileHash,
-          file_url: urlData.publicUrl, file_size: entry.file.size,
-          upload_type: uploadType, uploaded_by: user.id,
-        });
-
-        // Auto-map and insert records with source_file reference
-        const records = entry.parsed.rows.map(row => ({
-          case_id: selectedCase,
-          source_file: entry.file.name,
-          ...mapRowToRecord(row, entry.mapping),
-          raw_data: row, // Store full raw JSON for flexible querying
-        }));
-
-        const BATCH_SIZE = 500;
-        let inserted = 0;
-        for (let j = 0; j < records.length; j += BATCH_SIZE) {
-          const batch = records.slice(j, j + BATCH_SIZE);
-          const { error } = await supabase.from(typeConfig.table as any).insert(batch as any);
-          if (error) throw error;
-          inserted += batch.length;
-          updated[i] = { ...updated[i], insertedCount: inserted };
-          setFiles([...updated]);
-        }
-
-        updated[i] = { ...updated[i], status: 'done', insertedCount: inserted };
         setFiles([...updated]);
       } catch (err: any) {
-        updated[i] = { ...updated[i], status: 'error', error: err.message };
+        updated[i] = { ...updated[i], status: 'error', error: err?.message || 'Upload failed' };
         setFiles([...updated]);
       }
-    }
-
-    // Run auto-analysis for CDR data
-    if (uploadType === 'cdr') {
-      toast({ title: 'Running auto-analysis...', description: 'Detecting patterns in uploaded data' });
-      try {
-        const analysisResults = await runAutoAnalysis(selectedCase);
-        toast({ title: 'Analysis complete', description: `${analysisResults.length} insights generated` });
-      } catch { /* ignore */ }
     }
 
     const totalInserted = updated.reduce((s, e) => s + e.insertedCount, 0);
@@ -192,37 +180,83 @@ export default function DataUpload() {
   };
 
   const updateLabel = (idx: number, label: string) => {
-    setFiles(prev => {
-      const next = [...prev];
-      next[idx] = { ...next[idx], numberLabel: label };
-      return next;
-    });
+    setFiles(prev => { const next = [...prev]; next[idx] = { ...next[idx], numberLabel: label }; return next; });
   };
-
-  const removeFile = (idx: number) => {
-    setFiles(prev => prev.filter((_, i) => i !== idx));
-  };
-
+  const removeFile = (idx: number) => setFiles(prev => prev.filter((_, i) => i !== idx));
   const reset = () => {
-    setFiles([]); setStep('select');
+    setFiles([]); setStep('select'); setDuplicateWarning(null);
+    setProcurement({ period_from: '', period_to: '', notes: '' });
+    setFileMapping({});
     if (fileRef.current) fileRef.current.value = '';
+  };
+
+  const setMappingFor = (idx: number, type: 'new_person' | 'alias' | 'existing', value?: string, personId?: string) => {
+    setFileMapping(prev => ({
+      ...prev,
+      [idx]: type === 'new_person' ? { type, nameSoFather: value || '' } :
+        type === 'alias' ? { type, aliasName: value || '' } :
+          { type, existingPersonId: personId || value || '' },
+    }));
+  };
+
+  const handleSaveMapping = async () => {
+    if (!selectedCase) return;
+    setMappingSaving(true);
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const entry = files[i];
+        if (entry.status !== 'done' || !entry.detectedNumber) continue;
+        const m = fileMapping[i];
+        if (!m) continue;
+        const num = entry.detectedNumber;
+        if (m.type === 'alias' && m.aliasName?.trim()) {
+          await api.createOrUpdateAlias(selectedCase, num, m.aliasName.trim());
+          setExistingAliases(prev => ({ ...prev, [num]: m.aliasName!.trim() }));
+        } else if (m.type === 'new_person' && m.nameSoFather?.trim()) {
+          const created = await api.createPerson(selectedCase, m.nameSoFather.trim(), [num]);
+          setCasePersons(prev => [...prev, { id: created.id, name: created.name, phone_numbers: created.phone_numbers }]);
+        } else if (m.type === 'existing' && m.existingPersonId) {
+          if (m.existingPersonId.startsWith('alias:')) {
+            const aliasPhone = m.existingPersonId.slice(6);
+            const aliasName = existingAliases[aliasPhone] || aliasPhone;
+            await api.createOrUpdateAlias(selectedCase, num, aliasName);
+            setExistingAliases(prev => ({ ...prev, [num]: aliasName }));
+          } else {
+            const person = casePersons.find(p => p.id === m.existingPersonId);
+            if (person) {
+              const phones = Array.isArray(person.phone_numbers) ? [...person.phone_numbers] : [];
+              if (!phones.includes(num)) phones.push(num);
+              await api.updatePersonPhones(person.id, phones);
+              setCasePersons(prev => prev.map(p => p.id === person.id ? { ...p, phone_numbers: phones } : p));
+            }
+          }
+        }
+      }
+      toast({ title: 'Mapping saved', description: 'Names and aliases updated.' });
+      setStep('done');
+    } catch (e: any) {
+      toast({ title: 'Mapping failed', description: e?.message || 'Failed to save', variant: 'destructive' });
+    } finally {
+      setMappingSaving(false);
+    }
   };
 
   const totalRows = files.reduce((s, e) => s + (e.parsed?.totalRows || 0), 0);
   const totalInserted = files.reduce((s, e) => s + e.insertedCount, 0);
   const readyCount = files.filter(e => e.status === 'ready').length;
   const mappedCount = files.filter(e => Object.keys(e.mapping).length > 0).length;
+  const stepLabels = ['Procurement Info', 'Select Files', 'Review & Name', 'Processing', 'Done', 'Mapping'];
+  const stepKeys = ['procurement', 'select', 'review', 'processing', 'done', 'mapping'];
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <h1 className="text-2xl font-bold tracking-tight">Data Upload</h1>
-      <p className="text-muted-foreground">Upload multiple files — columns are auto-detected, data stored as searchable JSON.</p>
+      <p className="text-muted-foreground">Upload CDR/IPDR/Tower/SDR data with procurement tracking and duplicate detection.</p>
 
       {/* Step indicator */}
-      <div className="flex items-center gap-2 text-sm">
-        {['Select Files', 'Review & Name', 'Processing', 'Done'].map((label, i) => {
-          const steps = ['select', 'review', 'processing', 'done'];
-          const currentIdx = steps.indexOf(step);
+      <div className="flex items-center gap-2 text-sm flex-wrap">
+        {stepLabels.map((label, i) => {
+          const currentIdx = stepKeys.indexOf(step);
           return (
             <div key={label} className="flex items-center gap-2">
               <div className={`h-7 w-7 rounded-full flex items-center justify-center text-xs font-medium ${
@@ -230,29 +264,45 @@ export default function DataUpload() {
                 i < currentIdx ? 'bg-success text-success-foreground' : 'bg-muted text-muted-foreground'
               }`}>{i < currentIdx ? '✓' : i + 1}</div>
               <span className={i === currentIdx ? 'font-medium' : 'text-muted-foreground'}>{label}</span>
-              {i < 3 && <ArrowRight className="h-4 w-4 text-muted-foreground" />}
+              {i < stepLabels.length - 1 && <ArrowRight className="h-4 w-4 text-muted-foreground" />}
             </div>
           );
         })}
       </div>
 
-      {step === 'select' && (
+      {/* Role check */}
+      {selectedCase && !checkingRole && !canUpload && myCaseRole !== null && (
+        <Card className="border-destructive/50">
+          <CardContent className="p-4 flex items-center gap-3">
+            <ShieldAlert className="h-5 w-5 text-destructive" />
+            <div>
+              <p className="text-sm font-medium text-destructive">Access Denied</p>
+              <p className="text-xs text-muted-foreground">
+                Only Procurement or Case Incharge (CIO) can upload data. Your role: <Badge variant="outline">{myCaseRole}</Badge>
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Step: Procurement metadata */}
+      {step === 'procurement' && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Upload Evidence Files</CardTitle>
-            <CardDescription>Select multiple .xlsx, .xls, .csv files — no manual mapping needed</CardDescription>
+            <CardTitle className="text-lg">Procurement Details</CardTitle>
+            <CardDescription>Enter procurement metadata before uploading files</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Select Case</Label>
+                <Label>Select Case *</Label>
                 <Select value={selectedCase} onValueChange={setSelectedCase}>
                   <SelectTrigger><SelectValue placeholder="Choose a case..." /></SelectTrigger>
                   <SelectContent>{cases.map(c => <SelectItem key={c.id} value={c.id}>{c.title}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Data Type</Label>
+                <Label>Data Type *</Label>
                 <Select value={uploadType} onValueChange={setUploadType}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -264,19 +314,91 @@ export default function DataUpload() {
                 </Select>
               </div>
             </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Period From</Label>
+                <Input type="date" value={procurement.period_from} onChange={e => setProcurement(p => ({ ...p, period_from: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Period To</Label>
+                <Input type="date" value={procurement.period_to} onChange={e => setProcurement(p => ({ ...p, period_to: e.target.value }))} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <Textarea value={procurement.notes} onChange={e => setProcurement(p => ({ ...p, notes: e.target.value }))} placeholder="Any procurement notes..." rows={2} />
+            </div>
+
+            {duplicateWarning && (
+              <div className="p-3 rounded-lg bg-warning/10 border border-warning/30 text-sm text-warning flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                <span>{duplicateWarning}</span>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={reset}>Cancel</Button>
+              <Button onClick={handleProcurementNext} disabled={!selectedCase}>
+                Next: Select Files <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {step === 'select' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Upload Evidence Files</CardTitle>
+            <CardDescription>Select multiple .xlsx, .xls, .csv files — no manual mapping needed</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {!selectedCase && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Select Case</Label>
+                  <Select value={selectedCase} onValueChange={setSelectedCase}>
+                    <SelectTrigger><SelectValue placeholder="Choose a case..." /></SelectTrigger>
+                    <SelectContent>{cases.map(c => <SelectItem key={c.id} value={c.id}>{c.title}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Data Type</Label>
+                  <Select value={uploadType} onValueChange={setUploadType}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cdr">CDR (Call Detail Records)</SelectItem>
+                      <SelectItem value="ipdr">IPDR (IP Detail Records)</SelectItem>
+                      <SelectItem value="tower_dump">Tower Dump</SelectItem>
+                      <SelectItem value="sdr">SDR (Subscriber Detail Records)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            {/* Start with procurement step button */}
+            {selectedCase && canUpload && step === 'select' && files.length === 0 && (
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={() => setStep('procurement')}>
+                  Enter Procurement Details First
+                </Button>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label>Files</Label>
               <div className="border-2 border-dashed border-border rounded-lg p-8 text-center cursor-pointer hover:border-primary/50 transition-colors"
-                onClick={() => fileRef.current?.click()}>
+                onClick={() => { if (canUpload) fileRef.current?.click(); }}>
                 <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">Click to select files (Ctrl/Cmd for multiple)</p>
               </div>
               <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" multiple
                 onChange={e => {
                   const fl = e.target.files;
-                  if (fl && fl.length > 0 && selectedCase) handleFilesSelect(fl);
-                  else if (fl && fl.length > 0) toast({ title: 'Select a case first', variant: 'destructive' });
+                  if (fl && fl.length > 0 && selectedCase && canUpload) handleFilesSelect(fl);
+                  else if (fl && fl.length > 0 && !selectedCase) toast({ title: 'Select a case first', variant: 'destructive' });
+                  else if (fl && fl.length > 0 && !canUpload) toast({ title: 'You do not have upload permission for this case', variant: 'destructive' });
                 }}
                 className="hidden" />
             </div>
@@ -311,8 +433,6 @@ export default function DataUpload() {
                     {entry.status === 'error' && <span className="text-destructive">· {entry.error}</span>}
                   </div>
                 </div>
-
-                {/* Phone number detection & naming */}
                 {entry.detectedNumber && (
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <Phone className="h-4 w-4 text-muted-foreground" />
@@ -322,22 +442,16 @@ export default function DataUpload() {
                         {existingAliases[entry.detectedNumber]}
                       </span>
                     ) : (
-                      <Input
-                        className="h-7 w-32 text-xs"
-                        placeholder="Name this number"
-                        value={entry.numberLabel}
-                        onChange={e => updateLabel(i, e.target.value)}
-                      />
+                      <Input className="h-7 w-32 text-xs" placeholder="Name this number"
+                        value={entry.numberLabel} onChange={e => updateLabel(i, e.target.value)} />
                     )}
                   </div>
                 )}
-
                 <button onClick={() => removeFile(i)} className="text-muted-foreground hover:text-destructive">
                   <X className="h-4 w-4" />
                 </button>
               </div>
             ))}
-
             <div className="flex justify-between pt-2">
               <Button variant="outline" onClick={reset}>Back</Button>
               <Button onClick={handleProcessAll} disabled={readyCount === 0}>
@@ -350,9 +464,7 @@ export default function DataUpload() {
 
       {step === 'processing' && (
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Processing Files...</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle className="text-lg">Processing Files...</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             {files.map((entry, i) => (
               <div key={i} className="space-y-1">
@@ -364,9 +476,7 @@ export default function DataUpload() {
                     {entry.status === 'ready' && <FileSpreadsheet className="h-3 w-3 text-muted-foreground" />}
                     <span className="truncate max-w-64">{entry.file.name}</span>
                   </span>
-                  <span className="text-xs text-muted-foreground">
-                    {entry.insertedCount}/{entry.parsed?.totalRows ?? 0}
-                  </span>
+                  <span className="text-xs text-muted-foreground">{entry.insertedCount}/{entry.parsed?.totalRows ?? 0}</span>
                 </div>
                 <Progress value={entry.parsed?.totalRows ? (entry.insertedCount / entry.parsed.totalRows) * 100 : 0} className="h-1.5" />
               </div>
@@ -390,7 +500,97 @@ export default function DataUpload() {
                 ))}
               </div>
             )}
-            <Button onClick={reset} className="mt-4">Upload More Files</Button>
+            <div className="mt-4 flex justify-center gap-3 flex-wrap">
+              <Button variant="outline" onClick={() => setStep('mapping')}>
+                Map to name / alias / existing person
+              </Button>
+              <Button onClick={reset}>Upload More Files</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {step === 'mapping' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Map numbers to name or person</CardTitle>
+            <CardDescription>
+              For each uploaded file, link the detected number to: <strong>Name s/o Father</strong>, <strong>Alias</strong>, or an <strong>existing person</strong> in the case.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {files.map((entry, idx) => {
+              if (entry.status !== 'done') return null;
+              const m = fileMapping[idx] || { type: 'alias' as const };
+              const num = entry.detectedNumber;
+              return (
+                <div key={idx} className="p-4 rounded-lg border border-border space-y-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <FileSpreadsheet className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-medium truncate">{entry.file.name}</span>
+                    {num && <Badge variant="secondary" className="font-mono">{num}</Badge>}
+                  </div>
+                  {!num ? (
+                    <p className="text-xs text-muted-foreground">No number detected from filename — add alias from Case Records later if needed.</p>
+                  ) : (
+                    <>
+                      <div className="flex gap-2 flex-wrap">
+                        <Button type="button" variant={m.type === 'new_person' ? 'default' : 'outline'} size="sm" onClick={() => setMappingFor(idx, 'new_person')}>
+                          Name s/o Father
+                        </Button>
+                        <Button type="button" variant={m.type === 'alias' ? 'default' : 'outline'} size="sm" onClick={() => setMappingFor(idx, 'alias')}>
+                          Alias
+                        </Button>
+                        <Button type="button" variant={m.type === 'existing' ? 'default' : 'outline'} size="sm" onClick={() => setMappingFor(idx, 'existing')}>
+                          Existing person
+                        </Button>
+                      </div>
+                      {m.type === 'new_person' && (
+                        <Input placeholder="e.g. Ramesh s/o Suresh" value={m.nameSoFather || ''} onChange={e => setMappingFor(idx, 'new_person', e.target.value)} className="max-w-sm" />
+                      )}
+                      {m.type === 'alias' && (
+                        <Input placeholder="Alias name" value={m.aliasName || ''} onChange={e => setMappingFor(idx, 'alias', e.target.value)} className="max-w-sm" />
+                      )}
+                      {m.type === 'existing' && (
+                        <Select value={m.existingPersonId || ''} onValueChange={v => setMappingFor(idx, 'existing', undefined, v)}>
+                          <SelectTrigger className="max-w-sm"><SelectValue placeholder="Select person or alias..." /></SelectTrigger>
+                          <SelectContent>
+                            {casePersons.length > 0 && (
+                              <>
+                                <span className="text-xs font-medium text-muted-foreground px-2 py-1.5 block">Persons</span>
+                                {casePersons.map(p => (
+                                  <SelectItem key={p.id} value={p.id}>{p.name} {p.phone_numbers?.length ? `(${p.phone_numbers.length} numbers)` : ''}</SelectItem>
+                                ))}
+                              </>
+                            )}
+                            {Object.keys(existingAliases).length > 0 && (
+                              <>
+                                <span className="text-xs font-medium text-muted-foreground px-2 py-1.5 block border-t border-border mt-1 pt-1">Phone aliases</span>
+                                {Object.entries(existingAliases).map(([phone, name]) => (
+                                  <SelectItem key={`alias-${phone}`} value={`alias:${phone}`}>
+                                    {name} ({phone})
+                                  </SelectItem>
+                                ))}
+                              </>
+                            )}
+                            {casePersons.length === 0 && Object.keys(existingAliases).length === 0 && (
+                              <span className="text-xs text-muted-foreground px-2 py-1.5 block">No persons or aliases in case yet. Use &quot;Name s/o Father&quot; or &quot;Alias&quot; to add.</span>
+                            )}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+            <div className="flex justify-between pt-2">
+              <Button variant="outline" onClick={() => setStep('done')}>Back</Button>
+              <Button onClick={handleSaveMapping} disabled={mappingSaving}>
+                {mappingSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Save mapping
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}

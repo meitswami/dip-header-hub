@@ -24,7 +24,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<AuthContextType['profile']>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchUserData = useCallback(async (userId: string) => {
+  /** Superadmin email: always gets admin role and full profile when using stub auth */
+  const SUPERADMIN_EMAIL = 'meit.swami@ops.in';
+
+  const fetchUserData = useCallback(async (userId: string, email?: string | null) => {
+    if (email === SUPERADMIN_EMAIL) {
+      setRole('admin');
+      setProfile({
+        full_name: 'Meit Swami',
+        badge_number: null,
+        department: null,
+        phone: null,
+      });
+      return;
+    }
     const [roleRes, profileRes] = await Promise.all([
       supabase.from('user_roles').select('role').eq('user_id', userId).maybeSingle(),
       supabase.from('profiles').select('full_name, badge_number, department, phone').eq('id', userId).maybeSingle(),
@@ -38,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
-        setTimeout(() => fetchUserData(session.user.id), 0);
+        setTimeout(() => fetchUserData(session.user.id, session.user.email), 0);
       } else {
         setRole(null);
         setProfile(null);
@@ -49,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
-      if (session?.user) fetchUserData(session.user.id);
+      if (session?.user) fetchUserData(session.user.id, session.user.email);
       setLoading(false);
     });
 

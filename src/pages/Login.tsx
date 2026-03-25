@@ -31,14 +31,32 @@ export default function Login() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      if (isLogin) {
-        const { error } = await signIn(email, password);
-        if (error) toast({ title: 'Login failed', description: error.message, variant: 'destructive' });
-      } else {
-        const { error } = await signUp(email, password, fullName);
-        if (error) toast({ title: 'Signup failed', description: error.message, variant: 'destructive' });
-        else toast({ title: 'Account created', description: 'You can now log in.' });
+      const authPromise = isLogin
+        ? signIn(email, password)
+        : signUp(email, password, fullName);
+      const timeoutMs = 45000;
+      const timeoutPromise = new Promise<{ error: Error | null }>((_, reject) =>
+        setTimeout(() => reject(new Error('Connection timeout')), timeoutMs)
+      );
+      const { error } = await Promise.race([authPromise, timeoutPromise]);
+      if (error) {
+        const msg = error.message.toLowerCase().includes('fetch') || error.message.includes('timeout')
+          ? 'Cannot reach the server. Run start.bat and wait for "Backend is responding", or try again in a minute.'
+          : error.message;
+        toast({ title: isLogin ? 'Login failed' : 'Signup failed', description: msg, variant: 'destructive' });
+      } else if (!isLogin) {
+        toast({ title: 'Account created', description: 'You can now log in.' });
       }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Request failed';
+      const description = msg === 'Connection timeout'
+        ? 'Backend did not respond in 45s. Wait 1–2 minutes after starting Docker, then try Sign In again. Check: docker compose ps'
+        : msg;
+      toast({
+        title: 'Connection error',
+        description,
+        variant: 'destructive',
+      });
     } finally {
       setSubmitting(false);
     }
@@ -59,7 +77,9 @@ export default function Login() {
           <CardHeader className="space-y-1 pb-4">
             <CardTitle className="text-xl">{isLogin ? 'Sign In' : 'Create Account'}</CardTitle>
             <CardDescription>
-              {isLogin ? 'Enter your credentials to access the platform' : 'Register as a new officer'}
+              {isLogin
+                ? 'Enter your credentials to access the platform. First time? Use Sign up below.'
+                : 'Register as a new officer'}
             </CardDescription>
           </CardHeader>
           <CardContent>

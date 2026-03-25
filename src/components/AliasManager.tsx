@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/hooks/useAuth';
+import { api } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,12 +15,9 @@ type Alias = {
   id: string;
   phone_number: string;
   alias_name: string;
-  confidence: number | null;
-  photo_url: string | null;
 };
 
 export default function AliasManager({ caseId }: Props) {
-  const { user } = useAuth();
   const [aliases, setAliases] = useState<Alias[]>([]);
   const [loading, setLoading] = useState(true);
   const [phone, setPhone] = useState('');
@@ -33,62 +29,46 @@ export default function AliasManager({ caseId }: Props) {
   }, [caseId]);
 
   async function loadAliases() {
-    const { data } = await supabase
-      .from('aliases')
-      .select('id, phone_number, alias_name, confidence, photo_url')
-      .eq('case_id', caseId)
-      .order('created_at', { ascending: false });
-    if (data) setAliases(data);
+    try {
+      const data = await api.getAliases(caseId);
+      setAliases(data as Alias[]);
+    } catch {
+      setAliases([]);
+    }
     setLoading(false);
   }
 
   async function addAlias() {
-    if (!phone.trim() || !name.trim() || !user) return;
+    if (!phone.trim() || !name.trim()) return;
     setAdding(true);
-    const { error } = await supabase.from('aliases').insert({
-      case_id: caseId,
-      phone_number: phone.trim(),
-      alias_name: name.trim(),
-      created_by: user.id,
-    });
-    if (error) {
-      toast({ title: 'Failed to add alias', description: error.message, variant: 'destructive' });
-    } else {
+    try {
+      await api.createOrUpdateAlias(caseId, phone.trim(), name.trim());
       toast({ title: 'Alias added' });
       setPhone('');
       setName('');
       loadAliases();
+    } catch (e: any) {
+      toast({ title: 'Failed to add alias', description: e?.message, variant: 'destructive' });
     }
     setAdding(false);
   }
 
-  async function uploadPhoto(aliasId: string, file: File) {
-    const filePath = `${caseId}/alias_${aliasId}_${Date.now()}.${file.name.split('.').pop()}`;
-    const { error: uploadErr } = await supabase.storage
-      .from('evidence')
-      .upload(filePath, file);
-    if (uploadErr) {
-      toast({ title: 'Upload failed', description: uploadErr.message, variant: 'destructive' });
-      return;
-    }
-
-    const { data: { publicUrl } } = supabase.storage.from('evidence').getPublicUrl(filePath);
-
-    await supabase.from('aliases').update({ photo_url: filePath }).eq('id', aliasId);
-    toast({ title: 'Photo uploaded' });
-    loadAliases();
+  async function uploadPhoto(_aliasId: string, _file: File) {
+    toast({ title: 'Photo upload not available', description: 'Use backend storage for evidence.' });
   }
 
   async function deleteAlias(id: string) {
     if (!confirm('Delete this alias?')) return;
-    await supabase.from('aliases').delete().eq('id', id);
-    loadAliases();
+    try {
+      await api.deleteAlias(id);
+      loadAliases();
+    } catch {
+      toast({ title: 'Delete failed', variant: 'destructive' });
+    }
   }
 
-  function getPhotoUrl(path: string | null) {
-    if (!path) return '';
-    const { data } = supabase.storage.from('evidence').getPublicUrl(path);
-    return data.publicUrl;
+  function getPhotoUrl(_path: string | null) {
+    return '';
   }
 
   return (
@@ -152,7 +132,7 @@ export default function AliasManager({ caseId }: Props) {
                   <p className="text-xs text-muted-foreground font-mono">{alias.phone_number}</p>
                 </div>
                 {alias.confidence && (
-                  <span className="text-xs text-muted-foreground">{(alias.confidence * 100).toFixed(0)}%</span>
+                  <span className="text-xs text-muted-foreground">{alias.confidence}</span>
                 )}
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => deleteAlias(alias.id)}>
                   <Trash2 className="h-3.5 w-3.5" />

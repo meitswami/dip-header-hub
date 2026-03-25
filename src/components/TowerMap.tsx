@@ -99,20 +99,20 @@ export default function TowerMap({ caseId }: { caseId: string }) {
   useEffect(() => {
     async function load() {
       const [cdrRes, towerRes, fenceRes] = await Promise.all([
-        supabase.from('cdr_records').select('id,lat,lng,call_date,calling_number,called_number,call_type,location,cell_id').eq('case_id', caseId).not('lat', 'is', null).not('lng', 'is', null).order('call_date', { ascending: true }).limit(500),
-        supabase.from('tower_dump_records').select('id,lat,lng,timestamp,msisdn,location,cell_id,imei').eq('case_id', caseId).not('lat', 'is', null).not('lng', 'is', null).order('timestamp', { ascending: true }).limit(500),
-        supabase.from('geofences').select('*').eq('case_id', caseId).eq('active', true),
+        supabase.from('cdr_records').select('id,tower_lat,tower_lng,call_date,calling_number,called_number,call_type,tower_location,cell_id').eq('case_id', caseId).not('tower_lat', 'is', null).not('tower_lng', 'is', null).order('call_date', { ascending: true }).limit(500),
+        supabase.from('tower_dump_records').select('id,tower_lat,tower_lng,event_time,mobile_number,tower_location,cell_id,imei').eq('case_id', caseId).not('tower_lat', 'is', null).not('tower_lng', 'is', null).order('event_time', { ascending: true }).limit(500),
+        supabase.from('geofences').select('*').eq('case_id', caseId),
       ]);
 
       const pts: LocationPoint[] = [];
-      (cdrRes.data || []).forEach(r => {
-        if (r.lat && r.lng) pts.push({ lat: r.lat, lng: r.lng, label: r.calling_number || r.called_number || 'Unknown', time: r.call_date || '', type: 'cdr', details: `${r.call_type || 'Call'} | Cell: ${r.cell_id || '—'} | ${r.location || '—'}`, id: r.id });
+      (cdrRes.data || []).forEach((r: any) => {
+        if (r.tower_lat && r.tower_lng) pts.push({ lat: r.tower_lat, lng: r.tower_lng, label: r.calling_number || r.called_number || 'Unknown', time: r.call_date || '', type: 'cdr', details: `${r.call_type || 'Call'} | Cell: ${r.cell_id || '—'} | ${r.tower_location || '—'}`, id: r.id });
       });
-      (towerRes.data || []).forEach(r => {
-        if (r.lat && r.lng) pts.push({ lat: r.lat, lng: r.lng, label: r.msisdn || r.imei || 'Unknown', time: r.timestamp || '', type: 'tower', details: `Cell: ${r.cell_id || '—'} | ${r.location || '—'}`, id: r.id });
+      (towerRes.data || []).forEach((r: any) => {
+        if (r.tower_lat && r.tower_lng) pts.push({ lat: r.tower_lat, lng: r.tower_lng, label: r.mobile_number || r.imei || 'Unknown', time: r.event_time || '', type: 'tower', details: `Cell: ${r.cell_id || '—'} | ${r.tower_location || '—'}`, id: r.id });
       });
       setPoints(pts);
-      setGeofences((fenceRes.data || []).map((f: any) => ({ id: f.id, name: f.name, center_lat: f.center_lat, center_lng: f.center_lng, radius_meters: f.radius_meters, color: f.color || '#ef4444', active: f.active })));
+      setGeofences((fenceRes.data || []).map((f: any) => ({ id: f.id, name: f.name, center_lat: f.lat, center_lng: f.lng, radius_meters: f.radius_meters, color: '#ef4444', active: true })));
       setLoading(false);
     }
     load();
@@ -185,12 +185,12 @@ export default function TowerMap({ caseId }: { caseId: string }) {
   const addGeofence = async () => {
     if (!newFence.name || !newFence.lat || !newFence.lng || !user) return;
     const { data, error } = await supabase.from('geofences').insert({
-      case_id: caseId, name: newFence.name, zone_type: 'circle',
-      center_lat: parseFloat(newFence.lat), center_lng: parseFloat(newFence.lng),
+      case_id: caseId, name: newFence.name,
+      lat: parseFloat(newFence.lat), lng: parseFloat(newFence.lng),
       radius_meters: parseFloat(newFence.radius) || 500, created_by: user.id,
-    }).select().single();
+    } as any).select().single();
     if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); return; }
-    if (data) setGeofences(prev => [...prev, { id: data.id, name: data.name, center_lat: data.center_lat!, center_lng: data.center_lng!, radius_meters: data.radius_meters!, color: data.color || '#ef4444', active: true }]);
+    if (data) setGeofences(prev => [...prev, { id: (data as any).id, name: (data as any).name, center_lat: (data as any).lat, center_lng: (data as any).lng, radius_meters: (data as any).radius_meters, color: '#ef4444', active: true }]);
     setNewFence({ name: '', lat: '', lng: '', radius: '500' });
     setShowGeofenceDialog(false);
     toast({ title: 'Geofence created', description: `Zone "${data.name}" is now active` });

@@ -30,19 +30,7 @@ const DOC_CATEGORIES = [
   { value: 'other', label: 'Other' },
 ];
 
-type CaseDoc = {
-  id: string;
-  case_id: string;
-  title: string;
-  file_name: string;
-  file_url: string;
-  file_size: number | null;
-  category: string;
-  document_type: string | null;
-  description: string | null;
-  file_hash: string | null;
-  created_at: string;
-};
+type CaseDoc = any;
 
 export default function CaseDocuments() {
   const { user } = useAuth();
@@ -99,13 +87,11 @@ export default function CaseDocuments() {
         await supabase.from('case_documents').insert({
           case_id: selectedCase,
           title: file.name.replace(/\.[^.]+$/, ''),
-          file_name: file.name,
-          file_url: filePath,
+          file_path: filePath,
           file_size: file.size,
-          category,
-          file_hash: fileHash,
+          file_type: file.type,
           uploaded_by: user.id,
-        });
+        } as any);
 
         toast({ title: 'Document uploaded', description: file.name });
       } catch (err: any) {
@@ -206,7 +192,7 @@ export default function CaseDocuments() {
                   className="cursor-pointer"
                   onClick={() => setFilterCategory(cat)}
                 >
-                  {DOC_CATEGORIES.find(c => c.value === cat)?.label || cat} ({count})
+                  {DOC_CATEGORIES.find(c => c.value === cat)?.label || cat} ({String(count)})
                 </Badge>
               ))}
             </div>
@@ -247,7 +233,7 @@ export default function CaseDocuments() {
                       )}
                     </div>
                     <Badge variant="outline">
-                      {DOC_CATEGORIES.find(c => c.value === doc.category)?.label || doc.category}
+                      {String(DOC_CATEGORIES.find(c => c.value === (doc as any).category)?.label || (doc as any).category || '')}
                     </Badge>
                     <Button variant="ghost" size="icon" onClick={() => deleteDoc(doc)}>
                       <Trash2 className="h-4 w-4" />

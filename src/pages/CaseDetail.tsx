@@ -24,6 +24,7 @@ import CaseDataSummary from '@/components/CaseDataSummary';
 import CrossCDRCommonNumbers from '@/components/CrossCDRCommonNumbers';
 import CaseTeamManager from '@/components/CaseTeamManager';
 import DataAssignmentPanel from '@/components/DataAssignmentPanel';
+import CaseKnowledgeBase from '@/components/CaseKnowledgeBase';
 
 export default function CaseDetail() {
   const { id } = useParams<{ id: string }>();
@@ -106,6 +107,9 @@ export default function CaseDetail() {
 
       {/* Documents */}
       <CaseDocumentManager caseId={id!} />
+
+      {/* AI Knowledge Base (universal document understanding + RAG) */}
+      <CaseKnowledgeBase caseId={id!} />
 
       {/* Persons */}
       <PersonProfileManager caseId={id!} />

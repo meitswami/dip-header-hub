@@ -27,6 +27,7 @@ import DataCleanup from "./pages/DataCleanup";
 import DataExport from "./pages/DataExport";
 import ProfileSettings from "./pages/ProfileSettings";
 import Settings from "./pages/Settings";
+import MysqlConnections from "./pages/MysqlConnections";
 import StaffMessages from "./pages/StaffMessages";
 import StaffManagement from "./pages/StaffManagement";
 import NotFound from "./pages/NotFound";
@@ -58,10 +59,7 @@ function AppRoutes() {
       <Route path="/cases" element={<RequireAuth><Cases /></RequireAuth>} />
       <Route path="/cases/new" element={<RequireAuth><NewCase /></RequireAuth>} />
       <Route path="/cases/:id" element={<RequireAuth><CaseDetail /></RequireAuth>} />
-<<<<<<< HEAD
       <Route path="/cases/:id/edit" element={<RequireAuth><CaseEdit /></RequireAuth>} />
-=======
->>>>>>> 190780503942b273a628c5916becb363ed820f3a
       <Route path="/cases/:id/records" element={<RequireAuth><CaseRecords /></RequireAuth>} />
       <Route path="/upload" element={<RequireAuth><RequireModule moduleKey="data_upload"><DataUpload /></RequireModule></RequireAuth>} />
       <Route path="/chat" element={<RequireAuth><RequireModule moduleKey="ai_chat"><AIChat /></RequireModule></RequireAuth>} />
@@ -75,6 +73,7 @@ function AppRoutes() {
       <Route path="/admin/cleanup" element={<RequireAuth><DataCleanup /></RequireAuth>} />
       <Route path="/admin/export" element={<RequireAuth><DataExport /></RequireAuth>} />
       <Route path="/admin/settings" element={<RequireAuth><Settings /></RequireAuth>} />
+      <Route path="/admin/mysql" element={<RequireAuth><MysqlConnections /></RequireAuth>} />
       <Route path="/messages" element={<RequireAuth><StaffMessages /></RequireAuth>} />
       <Route path="/profile" element={<RequireAuth><ProfileSettings /></RequireAuth>} />
       <Route path="*" element={<NotFound />} />

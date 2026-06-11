@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { parseSpreadsheet, parseSpreadsheetBestHeaders, ParseResult, autoMapColumns, mapRowToRecord, CDR_COLUMN_MAP, IPDR_COLUMN_MAP, SDR_COLUMN_MAP, TOWER_COLUMN_MAP } from '@/lib/dataParser';
+import ColumnExplain from '@/components/ColumnExplain';
 import * as XLSX from 'xlsx';
 
 const COLUMN_MAP: Record<string, Record<string, string[]>> = {
@@ -404,7 +405,12 @@ export default function CaseRecords() {
                     <TableRow>
                       <TableHead className="w-10 sticky top-0 bg-background">#</TableHead>
                       {headers.map(h => (
-                        <TableHead key={h} className="whitespace-nowrap text-xs sticky top-0 bg-background min-w-[8rem]">{h}</TableHead>
+                        <TableHead key={h} className="whitespace-nowrap text-xs sticky top-0 bg-background min-w-[8rem]">
+                          <div className="flex items-center gap-1">
+                            <span className="truncate">{h}</span>
+                            <ColumnExplain term={h} caseId={caseId} />
+                          </div>
+                        </TableHead>
                       ))}
                     </TableRow>
                   </TableHeader>

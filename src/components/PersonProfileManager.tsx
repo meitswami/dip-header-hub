@@ -263,59 +263,6 @@ export default function PersonProfileManager({ caseId }: Props) {
             </table>
           </div>
         )}
-<<<<<<< HEAD
-=======
-
-        {/* Add/Edit Dialog */}
-        <Dialog open={showForm} onOpenChange={v => { if (!v) resetForm(); }}>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle>{editing ? 'Edit Person' : 'Add Person'}</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-medium mb-1 block">Full Name *</label>
-                <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Full name" />
-              </div>
-              <div>
-                <label className="text-xs font-medium mb-1 block">Role</label>
-                <Select value={form.role} onValueChange={v => setForm({ ...form, role: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {ROLES.map(r => <SelectItem key={r} value={r.toLowerCase()}>{r}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs font-medium mb-1 block">Phone Numbers</label>
-                {form.phone_numbers.map((num, i) => (
-                  <div key={i} className="flex gap-2 mb-1.5">
-                    <Input value={num} onChange={e => {
-                      const nums = [...form.phone_numbers];
-                      nums[i] = e.target.value;
-                      setForm({ ...form, phone_numbers: nums });
-                    }} placeholder={`Number ${i + 1}`} />
-                  </div>
-                ))}
-                <Button variant="ghost" size="sm" className="text-xs" onClick={() => setForm({ ...form, phone_numbers: [...form.phone_numbers, ''] })}>
-                  <Plus className="h-3 w-3 mr-1" /> Add Number
-                </Button>
-              </div>
-              <div>
-                <label className="text-xs font-medium mb-1 block">Notes</label>
-                <Input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Notes" />
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <Button variant="outline" onClick={resetForm}>Cancel</Button>
-                <Button onClick={savePerson} disabled={!form.name.trim() || uploading}>
-                  {uploading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
-                  {editing ? 'Update' : 'Add Person'}
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
->>>>>>> 190780503942b273a628c5916becb363ed820f3a
       </CardContent>
       </CollapsibleContent>
       </Collapsible>

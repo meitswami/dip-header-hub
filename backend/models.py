@@ -219,3 +219,81 @@ class PersonProfile(Base):
   created_by = Column(String)
   created_at = Column(DateTime, default=datetime.utcnow)
 
+
+class KbDocument(Base):
+  """A source document ingested into the knowledge base.
+
+  A document may be scoped to a case (case_id set) or global (case_id is None,
+  used for legal references like IPC/CrPC).
+  """
+
+  __tablename__ = "kb_documents"
+
+  id = Column(String, primary_key=True, index=True)
+  case_id = Column(String, ForeignKey("cases.id"), index=True)
+  file_name = Column(String, nullable=False)
+  file_hash = Column(String, index=True)
+  file_size = Column(BigInteger)
+  mime_type = Column(String)
+  source_type = Column(String)  # pdf | docx | xlsx | csv | txt | pptx | image | sql
+  category = Column(String)  # free-form (legal/sop/case-evidence/general)
+  title = Column(String)
+  status = Column(String, default="processing")  # processing | completed | error
+  error_message = Column(Text)
+  chunk_count = Column(Integer, default=0)
+  language = Column(String)  # en | hi | mixed
+  tags = Column(JSON)  # list of user tags
+  processing_started_at = Column(DateTime)
+  processing_completed_at = Column(DateTime)
+  created_at = Column(DateTime, default=datetime.utcnow)
+  created_by = Column(String)
+
+
+class MysqlConnection(Base):
+  """An admin-configured external MySQL database.
+
+  The password is stored AES-encrypted at rest. Connections are opened
+  read-only: the service layer wraps every request in a transaction and
+  rejects anything that is not a pure SELECT.
+  """
+
+  __tablename__ = "mysql_connections"
+
+  id = Column(String, primary_key=True, index=True)
+  name = Column(String, nullable=False)  # friendly label
+  host = Column(String, nullable=False)
+  port = Column(Integer, default=3306)
+  database = Column(String, nullable=False)
+  username = Column(String, nullable=False)
+  password_encrypted = Column(Text)  # Fernet token
+  ssl_enabled = Column(Boolean, default=False)
+  notes = Column(Text)
+  created_at = Column(DateTime, default=datetime.utcnow)
+  created_by = Column(String)
+  last_tested_at = Column(DateTime)
+  last_test_ok = Column(Boolean)
+  last_test_error = Column(Text)
+
+
+class KbChunk(Base):
+  """A retrievable chunk of text extracted from a KbDocument.
+
+  `embedding` stores a float32 numpy array serialized with np.tobytes().
+  `entities` stores a dict of extracted entities per chunk for entity-bridge
+  retrieval (e.g. {"phone": ["9812345678"], "imei": [...], "ip": [...]}).
+  """
+
+  __tablename__ = "kb_chunks"
+
+  id = Column(String, primary_key=True, index=True)
+  document_id = Column(String, ForeignKey("kb_documents.id"), index=True, nullable=False)
+  case_id = Column(String, index=True)
+  chunk_index = Column(Integer, default=0)
+  text = Column(Text, nullable=False)
+  page = Column(Integer)  # pdf page / slide number / sheet index
+  section = Column(String)  # sheet name / section heading
+  row_index = Column(Integer)  # row number for tabular sources
+  entities = Column(JSON)
+  embedding = Column(JSON)  # NOTE: stored as base64 string of float32 bytes
+  created_at = Column(DateTime, default=datetime.utcnow)
+

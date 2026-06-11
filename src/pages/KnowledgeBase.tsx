@@ -1,6 +1,5 @@
-import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/hooks/useAuth';
+import { useState, useEffect, useCallback } from 'react';
+import { api, type KbDocument, type KbCitation } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,10 +12,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/hooks/use-toast';
 import {
   Upload, FileText, Search, Loader2, BookOpen, Trash2, Clock,
-  CheckCircle, XCircle, Brain, Send, Bot, User, AlertCircle
+  CheckCircle, XCircle, Brain, Send, Bot, User, AlertCircle, Gauge,
 } from 'lucide-react';
 
 const CATEGORIES = [
+  { value: 'general', label: 'General Reference' },
   { value: 'ipc', label: 'Indian Penal Code (IPC)' },
   { value: 'crpc', label: 'Code of Criminal Procedure (CrPC)' },
   { value: 'it_act', label: 'Information Technology Act' },
@@ -27,106 +27,67 @@ const CATEGORIES = [
   { value: 'cyber_crime', label: 'Cyber Crime Manual' },
   { value: 'sop', label: 'Standard Operating Procedures' },
   { value: 'case_law', label: 'Case Laws & Judgments' },
-  { value: 'general', label: 'General Reference' },
 ];
 
-type KBDoc = any;
-
-type QAMessage = { role: 'user' | 'assistant'; content: string };
+type QAMessage = { role: 'user' | 'assistant'; content: string; citations?: KbCitation[] };
 
 export default function KnowledgeBase() {
-  const { user } = useAuth();
-  const [documents, setDocuments] = useState<KBDoc[]>([]);
+  const [documents, setDocuments] = useState<KbDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [category, setCategory] = useState('general');
   const [searchQuery, setSearchQuery] = useState('');
+  const [tier, setTier] = useState<'fast' | 'accurate'>('fast');
   const [qaMessages, setQaMessages] = useState<QAMessage[]>([]);
   const [qaInput, setQaInput] = useState('');
   const [qaLoading, setQaLoading] = useState(false);
 
-  useEffect(() => {
-    loadDocuments();
-    // Poll for processing status
-    const interval = setInterval(loadDocuments, 5000);
-    return () => clearInterval(interval);
+  const loadDocuments = useCallback(async () => {
+    try {
+      const data = await api.kbFiles(null, false);
+      setDocuments(data);
+    } catch (err) {
+      toast({ title: 'Failed to load documents', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  async function loadDocuments() {
-    const { data } = await supabase
-      .from('knowledge_base_documents')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (data) setDocuments(data as KBDoc[]);
-    setLoading(false);
-  }
+  useEffect(() => {
+    loadDocuments();
+    const interval = setInterval(loadDocuments, 4000);
+    return () => clearInterval(interval);
+  }, [loadDocuments]);
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
-    if (!files || !user) return;
-
+    if (!files || files.length === 0) return;
     setUploading(true);
-    for (const file of Array.from(files)) {
-      try {
-        const filePath = `${user.id}/${Date.now()}_${file.name}`;
-        const { error: uploadError } = await supabase.storage
-          .from('knowledge-base')
-          .upload(filePath, file);
-        if (uploadError) throw uploadError;
-
-        const fileUrl = filePath;
-
-        // Create document record
-        const { data: doc, error: insertError } = await supabase
-          .from('knowledge_base_documents')
-          .insert({
-            title: file.name.replace(/\.[^.]+$/, ''),
-            file_name: file.name,
-            file_url: fileUrl,
-            file_size: file.size,
-            category,
-            uploaded_by: user.id,
-            status: 'processing',
-            processing_started_at: new Date().toISOString(),
-          })
-          .select()
-          .single();
-        if (insertError) throw insertError;
-
-        // Trigger backend processing
-        const processResp = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-kb-document`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-            },
-            body: JSON.stringify({ documentId: doc.id, filePath: fileUrl }),
-          }
-        );
-
-        if (!processResp.ok) {
-          const errText = await processResp.text();
-          console.error('Processing error:', errText);
+    try {
+      for (const file of Array.from(files)) {
+        try {
+          await api.kbUpload(file, { caseId: null, category });
+          toast({ title: 'Document ingested', description: file.name });
+        } catch (err) {
+          toast({ title: 'Upload failed', description: (err as Error).message, variant: 'destructive' });
         }
-
-        toast({ title: 'Document uploaded', description: `${file.name} is being processed` });
-      } catch (err: any) {
-        toast({ title: 'Upload failed', description: err.message, variant: 'destructive' });
       }
+      await loadDocuments();
+    } finally {
+      setUploading(false);
+      e.target.value = '';
     }
-    setUploading(false);
-    e.target.value = '';
-    loadDocuments();
   }
 
-  async function deleteDocument(doc: KBDoc & { file_url?: string }) {
-    if (!confirm(`Delete "${doc.title}"? This will remove all extracted data.`)) return;
-    if ((doc as any).file_url) await supabase.storage.from('knowledge-base').remove([(doc as any).file_url]);
-    await supabase.from('knowledge_base_documents').delete().eq('id', doc.id);
-    toast({ title: 'Document deleted' });
-    loadDocuments();
+  async function deleteDocument(doc: KbDocument) {
+    if (!confirm(`Delete "${doc.title || doc.file_name}"? This removes its indexed chunks.`)) return;
+    try {
+      await api.kbDelete(doc.id);
+      toast({ title: 'Document deleted' });
+      loadDocuments();
+    } catch (err) {
+      toast({ title: 'Delete failed', description: (err as Error).message, variant: 'destructive' });
+    }
   }
 
   async function askQuestion() {
@@ -135,64 +96,16 @@ export default function KnowledgeBase() {
     setQaMessages(prev => [...prev, userMsg]);
     setQaInput('');
     setQaLoading(true);
-
     try {
-      const ollamaRaw = localStorage.getItem('dip-ollama-settings');
-      const ollamaSettings = ollamaRaw ? JSON.parse(ollamaRaw) : {};
-      const resp = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/kb-query`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({
-            question: userMsg.content,
-            messages: qaMessages.concat(userMsg),
-            ollamaUrl: ollamaSettings.url,
-            ollamaModel: ollamaSettings.model,
-          }),
-        }
-      );
-
-      if (!resp.ok) throw new Error('Query failed');
-
-      const reader = resp.body!.getReader();
-      const decoder = new TextDecoder();
-      let assistantText = '';
-      let textBuffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        textBuffer += decoder.decode(value, { stream: true });
-
-        let nlIdx: number;
-        while ((nlIdx = textBuffer.indexOf('\n')) !== -1) {
-          let line = textBuffer.slice(0, nlIdx);
-          textBuffer = textBuffer.slice(nlIdx + 1);
-          if (line.endsWith('\r')) line = line.slice(0, -1);
-          if (!line.startsWith('data: ')) continue;
-          const json = line.slice(6).trim();
-          if (json === '[DONE]') break;
-          try {
-            const parsed = JSON.parse(json);
-            const c = parsed.choices?.[0]?.delta?.content;
-            if (c) {
-              assistantText += c;
-              setQaMessages(prev => {
-                const last = prev[prev.length - 1];
-                if (last?.role === 'assistant')
-                  return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: assistantText } : m);
-                return [...prev, { role: 'assistant', content: assistantText }];
-              });
-            }
-          } catch {}
-        }
-      }
-    } catch (err: any) {
-      setQaMessages(prev => [...prev, { role: 'assistant', content: 'Error: ' + err.message }]);
+      const res = await api.kbQuery({
+        question: userMsg.content,
+        case_id: null,
+        include_global: true,
+        tier,
+      });
+      setQaMessages(prev => [...prev, { role: 'assistant', content: res.content, citations: res.citations }]);
+    } catch (err) {
+      setQaMessages(prev => [...prev, { role: 'assistant', content: 'Error: ' + (err as Error).message }]);
     } finally {
       setQaLoading(false);
     }
@@ -208,18 +121,22 @@ export default function KnowledgeBase() {
   };
 
   const processingDocs = documents.filter(d => d.status === 'processing');
-  const filteredDocs = documents.filter(d =>
-    !searchQuery ||
-    d.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    d.category.includes(searchQuery.toLowerCase())
-  );
+  const filteredDocs = documents.filter(d => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (d.title || '').toLowerCase().includes(q)
+      || (d.file_name || '').toLowerCase().includes(q)
+      || (d.category || '').toLowerCase().includes(q);
+  });
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Knowledge Base</h1>
-          <p className="text-muted-foreground">Upload legal documents, SOPs, and reference material for AI training</p>
+          <p className="text-muted-foreground">
+            Upload any document — PDF, Word, PowerPoint, Excel, CSV, SQL, or images (OCR) — and ask grounded questions.
+          </p>
         </div>
       </div>
 
@@ -230,11 +147,10 @@ export default function KnowledgeBase() {
         </TabsList>
 
         <TabsContent value="documents" className="space-y-4">
-          {/* Upload section */}
           <Card>
             <CardContent className="p-4">
-              <div className="flex items-end gap-4">
-                <div className="flex-1">
+              <div className="flex items-end gap-4 flex-wrap">
+                <div className="flex-1 min-w-[200px]">
                   <label className="text-sm font-medium mb-1.5 block">Category</label>
                   <Select value={category} onValueChange={setCategory}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -246,11 +162,11 @@ export default function KnowledgeBase() {
                   </Select>
                 </div>
                 <div>
-                  <label className="text-sm font-medium mb-1.5 block">Upload PDF(s)</label>
+                  <label className="text-sm font-medium mb-1.5 block">Upload documents</label>
                   <div className="relative">
                     <input
                       type="file"
-                      accept=".pdf,.doc,.docx,.txt"
+                      accept=".pdf,.doc,.docx,.txt,.md,.log,.xlsx,.xls,.csv,.tsv,.pptx,.ppt,.sql,.png,.jpg,.jpeg,.webp,.tiff,.bmp"
                       multiple
                       onChange={handleUpload}
                       disabled={uploading}
@@ -258,7 +174,7 @@ export default function KnowledgeBase() {
                     />
                     <Button variant="outline" disabled={uploading}>
                       {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-                      {uploading ? 'Uploading...' : 'Choose Files'}
+                      {uploading ? 'Ingesting...' : 'Choose Files'}
                     </Button>
                   </div>
                 </div>
@@ -266,13 +182,12 @@ export default function KnowledgeBase() {
             </CardContent>
           </Card>
 
-          {/* Processing status */}
           {processingDocs.length > 0 && (
             <Card className="border-warning/30 bg-warning/5">
               <CardContent className="p-4 space-y-3">
                 <div className="flex items-center gap-2 text-warning">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="text-sm font-medium">{processingDocs.length} document(s) being processed...</span>
+                  <span className="text-sm font-medium">{processingDocs.length} document(s) processing...</span>
                 </div>
                 {processingDocs.map(d => {
                   const elapsed = d.processing_started_at
@@ -281,9 +196,9 @@ export default function KnowledgeBase() {
                   return (
                     <div key={d.id} className="flex items-center gap-3">
                       <FileText className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm flex-1">{d.title}</span>
-                      <span className="text-xs text-muted-foreground">{elapsed}s elapsed</span>
-                      <Progress value={Math.min(elapsed * 2, 90)} className="w-24" />
+                      <span className="text-sm flex-1 truncate">{d.title || d.file_name}</span>
+                      <span className="text-xs text-muted-foreground">{elapsed}s</span>
+                      <Progress value={Math.min(elapsed * 5, 90)} className="w-24" />
                     </div>
                   );
                 })}
@@ -291,18 +206,16 @@ export default function KnowledgeBase() {
             </Card>
           )}
 
-          {/* Search */}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Search documents by title or category..."
+              placeholder="Search by title, filename, or category..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className="pl-9"
             />
           </div>
 
-          {/* Document list */}
           <div className="space-y-2">
             {loading ? (
               <Card><CardContent className="py-8 text-center"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></CardContent></Card>
@@ -311,7 +224,7 @@ export default function KnowledgeBase() {
                 <CardContent className="py-12 text-center text-muted-foreground">
                   <BookOpen className="h-10 w-10 mx-auto mb-3 opacity-40" />
                   <p className="font-medium">No documents in knowledge base</p>
-                  <p className="text-sm">Upload PDFs to train the AI with legal and procedural knowledge</p>
+                  <p className="text-sm">Upload any document to make it searchable and queryable.</p>
                 </CardContent>
               </Card>
             ) : (
@@ -320,14 +233,13 @@ export default function KnowledgeBase() {
                   <CardContent className="p-4 flex items-center gap-4">
                     {statusIcon(doc.status)}
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm truncate">{doc.title}</p>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                      <p className="font-medium text-sm truncate">{doc.title || doc.file_name}</p>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 flex-wrap">
                         <span>{doc.file_name}</span>
-                        {doc.file_size && <span>• {(doc.file_size / 1024).toFixed(0)} KB</span>}
+                        {doc.file_size ? <span>• {(doc.file_size / 1024).toFixed(0)} KB</span> : null}
                         {doc.chunk_count ? <span>• {doc.chunk_count} chunks</span> : null}
-                        {doc.processing_completed_at && doc.processing_started_at && (
-                          <span>• Processed in {Math.round((new Date(doc.processing_completed_at).getTime() - new Date(doc.processing_started_at).getTime()) / 1000)}s</span>
-                        )}
+                        {doc.source_type ? <span>• {doc.source_type.toUpperCase()}</span> : null}
+                        {doc.language ? <span>• lang: {doc.language}</span> : null}
                       </div>
                       {doc.error_message && (
                         <p className="text-xs text-destructive mt-1 flex items-center gap-1">
@@ -335,7 +247,11 @@ export default function KnowledgeBase() {
                         </p>
                       )}
                     </div>
-                    <Badge variant="outline">{CATEGORIES.find(c => c.value === doc.category)?.label || doc.category}</Badge>
+                    {doc.category && (
+                      <Badge variant="outline">
+                        {CATEGORIES.find(c => c.value === doc.category)?.label || doc.category}
+                      </Badge>
+                    )}
                     <Badge variant={doc.status === 'completed' ? 'default' : doc.status === 'error' ? 'destructive' : 'secondary'}>
                       {doc.status}
                     </Badge>
@@ -352,20 +268,34 @@ export default function KnowledgeBase() {
         <TabsContent value="ask">
           <Card className="flex flex-col h-[calc(100vh-16rem)]">
             <CardHeader className="pb-3 border-b border-border">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Brain className="h-5 w-5 text-primary" />
-                Ask the Knowledge Base
-              </CardTitle>
-              <p className="text-xs text-muted-foreground">
-                Ask questions from all uploaded documents. AI will search through the knowledge base and provide accurate answers.
-              </p>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Brain className="h-5 w-5 text-primary" />
+                    Ask the Knowledge Base
+                  </CardTitle>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Grounded answers with citations. English or Hindi.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Gauge className="h-4 w-4 text-muted-foreground" />
+                  <Select value={tier} onValueChange={v => setTier(v as 'fast' | 'accurate')}>
+                    <SelectTrigger className="h-8 w-36 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="fast">Fast (3B)</SelectItem>
+                      <SelectItem value="accurate">Accurate (7B)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
             </CardHeader>
             <ScrollArea className="flex-1 p-4">
               {qaMessages.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-muted-foreground py-16">
                   <Brain className="h-12 w-12 mb-4 opacity-40" />
-                  <p className="font-medium">Test your knowledge base</p>
-                  <p className="text-sm">Ask any question to verify the uploaded data accuracy</p>
+                  <p className="font-medium">Ask anything about the uploaded documents</p>
+                  <p className="text-sm">The answer cites source file + page/row.</p>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -376,10 +306,21 @@ export default function KnowledgeBase() {
                           <Bot className="h-4 w-4 text-primary" />
                         </div>
                       )}
-                      <div className={`max-w-[80%] rounded-lg px-4 py-3 text-sm whitespace-pre-wrap ${
-                        msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted'
-                      }`}>
-                        {msg.content}
+                      <div className={`max-w-[80%] space-y-2`}>
+                        <div className={`rounded-lg px-4 py-3 text-sm whitespace-pre-wrap ${
+                          msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted'
+                        }`}>
+                          {msg.content}
+                        </div>
+                        {msg.citations && msg.citations.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {msg.citations.map(c => (
+                              <Badge key={c.chunk_id} variant="outline" className="text-[10px] font-normal" title={c.preview}>
+                                [{c.index}] {c.file_name}{c.locator ? ` — ${c.locator}` : ''}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       {msg.role === 'user' && (
                         <div className="flex-shrink-0 h-8 w-8 rounded-lg bg-secondary flex items-center justify-center">
@@ -406,7 +347,7 @@ export default function KnowledgeBase() {
                 <Textarea
                   value={qaInput}
                   onChange={e => setQaInput(e.target.value)}
-                  placeholder="Ask a question from the knowledge base..."
+                  placeholder="Ask a question — e.g. 'Summarize IPC 420 penalties' or 'What is MSISDN?'"
                   className="min-h-[44px] max-h-32 resize-none"
                   rows={1}
                   onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); askQuestion(); } }}

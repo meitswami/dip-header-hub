@@ -5,6 +5,7 @@ from collections import defaultdict
 
 from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -18,10 +19,18 @@ from .models import (
   NumberIntelligence,
   EvidenceLog,
   TowerDumpRecord,
+  KbDocument,
+  KbChunk,
+  MysqlConnection,
 )
 from .services.intelligence import rebuild_case_intelligence
 from .services import ai_service
 from .services.upload import process_upload
+from .services import retrieval as retrieval_svc
+from .services.ingest import ingest_document
+from .services import embeddings as emb_svc
+from .services import dictionary as dict_svc
+from .services import mysql_service
 
 try:
   Base.metadata.create_all(bind=engine)
@@ -49,10 +58,15 @@ class ChatRequest(BaseModel):
   caseId: str
   messages: List[ChatMessage]
   styleLevel: Optional[str] = "simple"
+  # New, optional: "fast" (default) or "accurate"
+  tier: Optional[str] = "fast"
+  # New, optional: restrict retrieval to specific uploaded KB docs
+  document_ids: Optional[List[str]] = None
 
 
 class ChatResponse(BaseModel):
   content: str
+  citations: Optional[List[Dict[str, Any]]] = None
 
 
 class CaseSummaryResponse(BaseModel):
@@ -63,6 +77,7 @@ class CaseSummaryResponse(BaseModel):
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(payload: ChatRequest, db: Session = Depends(get_db)) -> Any:
+  """Grounded chat: structured (SQL/precomputed) + semantic (RAG over docs)."""
   case_id = payload.caseId
   messages = [m.model_dump() for m in payload.messages]
   last_user = ""
@@ -70,54 +85,98 @@ async def chat_endpoint(payload: ChatRequest, db: Session = Depends(get_db)) -> 
     if m.get("role") == "user":
       last_user = m.get("content") or ""
       break
-  query = last_user.lower()
-  numbers = re.findall(r"\b\d{10}\b", last_user)
 
-  intent, params = ai_service.detect_intent(query, numbers)
-
-  if intent == "direct_interconnection":
-    txt = ai_service.handle_direct_interconnection(db, case_id, params["a"], params["b"])
-  elif intent == "common_contacts":
-    txt = ai_service.handle_common_contacts(db, case_id, params["a"], params["b"])
-  elif intent == "number_summary":
-    txt = ai_service.handle_number_summary(db, case_id, params["n"])
-  elif intent == "case_summary":
-    txt = ai_service.handle_case_summary(db, case_id)
-  elif intent == "top_contacts":
-    txt = ai_service.handle_top_contacts_for_number(db, case_id, params["n"])
-  elif intent == "most_active":
-    txt = ai_service.handle_most_active_numbers(db, case_id)
-  else:
-    # LLM only for narrative / formatting; no new telecom computation
-    try:
-      txt = await ai_service.call_ollama_narrative(
-        case_id=case_id,
-        messages=messages,
-        style_level=payload.styleLevel or "simple",
-        db=db,
-      )
-    except Exception:
-      raise HTTPException(status_code=500, detail="AI service unavailable. Try again.")
-
-  # Persist simple chat log (no business logic change)
-  log_user = ChatLog(
-    id=_uuid(),
+  ctx = retrieval_svc.build_context(
+    db,
     case_id=case_id,
-    user_id=None,
-    role="user",
-    content=last_user,
+    question=last_user,
+    document_ids=payload.document_ids,
+    include_global=True,
   )
-  log_ai = ChatLog(
-    id=_uuid(),
-    case_id=case_id,
-    user_id=None,
-    role="assistant",
-    content=txt,
-  )
-  db.add_all([log_user, log_ai])
+
+  try:
+    content = await ai_service.call_ollama_rag(
+      model=ai_service.resolve_model(payload.tier),
+      messages=messages,
+      context_block=ctx.get("context_block", ""),
+      style_level=payload.styleLevel or "simple",
+      case_id=case_id,
+    )
+  except Exception:
+    # Fallback: if the LLM is unavailable but we have a structured fact, return it.
+    fact = ctx.get("structured_fact")
+    if fact:
+      content = fact
+    else:
+      raise HTTPException(status_code=503, detail="AI service unavailable. Try again.")
+
+  # Persist chat log
+  db.add_all([
+    ChatLog(id=_uuid(), case_id=case_id, user_id=None, role="user", content=last_user),
+    ChatLog(id=_uuid(), case_id=case_id, user_id=None, role="assistant", content=content),
+  ])
   db.commit()
 
-  return ChatResponse(content=txt)
+  return ChatResponse(content=content, citations=ctx.get("citations", []))
+
+
+@app.post("/chat/stream")
+async def chat_stream_endpoint(payload: ChatRequest, db: Session = Depends(get_db)):
+  """Server-Sent Events: yields citation metadata first, then token deltas."""
+  case_id = payload.caseId
+  messages = [m.model_dump() for m in payload.messages]
+  last_user = ""
+  for m in reversed(messages):
+    if m.get("role") == "user":
+      last_user = m.get("content") or ""
+      break
+
+  ctx = retrieval_svc.build_context(
+    db,
+    case_id=case_id,
+    question=last_user,
+    document_ids=payload.document_ids,
+    include_global=True,
+  )
+
+  import json as _json
+
+  async def event_generator():
+    # 1) Send the citations pack up-front so the UI can render source chips immediately.
+    meta = {
+      "type": "meta",
+      "citations": ctx.get("citations", []),
+      "structured_fact": ctx.get("structured_fact"),
+      "entities_in_question": ctx.get("entities_in_question", {}),
+    }
+    yield f"data: {_json.dumps(meta)}\n\n"
+
+    full_text = ""
+    try:
+      async for delta in ai_service.stream_ollama_rag(
+        model=ai_service.resolve_model(payload.tier),
+        messages=messages,
+        context_block=ctx.get("context_block", ""),
+        style_level=payload.styleLevel or "simple",
+        case_id=case_id,
+      ):
+        full_text += delta
+        yield f"data: {_json.dumps({'type': 'delta', 'content': delta})}\n\n"
+    except Exception as e:
+      fallback = ctx.get("structured_fact") or f"AI service unavailable ({e})."
+      full_text = fallback
+      yield f"data: {_json.dumps({'type': 'delta', 'content': fallback})}\n\n"
+
+    # Persist once at the end
+    db.add_all([
+      ChatLog(id=_uuid(), case_id=case_id, user_id=None, role="user", content=last_user),
+      ChatLog(id=_uuid(), case_id=case_id, user_id=None, role="assistant", content=full_text),
+    ])
+    db.commit()
+
+    yield f"data: {_json.dumps({'type': 'done'})}\n\n"
+
+  return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @app.post("/upload")
@@ -483,4 +542,291 @@ def get_chat_logs(case_id: str, limit: int = 100, db: Session = Depends(get_db))
 
 def _uuid() -> str:
   return str(uuid.uuid4())
+
+
+# -----------------------------------------------------------------------------
+# Knowledge Base (universal document ingestion + retrieval)
+# -----------------------------------------------------------------------------
+
+
+def _kb_doc_to_json(d: KbDocument) -> Dict[str, Any]:
+  return {
+    "id": d.id,
+    "case_id": d.case_id,
+    "file_name": d.file_name,
+    "title": d.title,
+    "category": d.category,
+    "source_type": d.source_type,
+    "status": d.status,
+    "error_message": d.error_message,
+    "chunk_count": d.chunk_count or 0,
+    "language": d.language,
+    "tags": d.tags or [],
+    "file_size": d.file_size,
+    "processing_started_at": d.processing_started_at.isoformat() if d.processing_started_at else None,
+    "processing_completed_at": d.processing_completed_at.isoformat() if d.processing_completed_at else None,
+    "created_at": d.created_at.isoformat() if d.created_at else None,
+  }
+
+
+@app.get("/kb/status")
+def kb_status() -> Any:
+  """Cheap health check for the KB subsystem (does NOT trigger model load)."""
+  from .services import reranker as rerank_svc
+  return {
+    "embedding": emb_svc.model_status(),
+    "reranker": rerank_svc.status(),
+    "chat_model_fast": ai_service.OLLAMA_MODEL,
+    "chat_model_accurate": ai_service.OLLAMA_MODEL_ACCURATE,
+    "ollama_url": ai_service.OLLAMA_URL,
+  }
+
+
+@app.post("/kb/upload")
+async def kb_upload(
+  file: UploadFile = File(...),
+  case_id: Optional[str] = Form(None),
+  category: Optional[str] = Form(None),
+  tags: Optional[str] = Form(None),  # comma-separated
+  uploaded_by: Optional[str] = Form(None),
+  title: Optional[str] = Form(None),
+  db: Session = Depends(get_db),
+):
+  """Ingest a single document into the knowledge base.
+
+  `case_id` may be omitted for a global document (legal references, SOPs, etc.).
+  """
+  content = await file.read()
+  if not content:
+    raise HTTPException(status_code=400, detail="Empty file")
+
+  tag_list: Optional[List[str]] = None
+  if tags:
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+
+  doc = ingest_document(
+    db,
+    case_id=case_id,
+    file_name=file.filename or "upload",
+    content=content,
+    category=category,
+    tags=tag_list,
+    uploaded_by=uploaded_by,
+    title=title,
+  )
+  return _kb_doc_to_json(doc)
+
+
+@app.get("/kb/files")
+def kb_files(
+  case_id: Optional[str] = Query(None),
+  include_global: bool = Query(True),
+  db: Session = Depends(get_db),
+) -> Any:
+  q = db.query(KbDocument)
+  if case_id is not None:
+    if include_global:
+      q = q.filter((KbDocument.case_id == case_id) | (KbDocument.case_id.is_(None)))
+    else:
+      q = q.filter(KbDocument.case_id == case_id)
+  rows = q.order_by(KbDocument.created_at.desc()).all()
+  return [_kb_doc_to_json(r) for r in rows]
+
+
+@app.get("/kb/files/{doc_id}")
+def kb_file(doc_id: str, db: Session = Depends(get_db)) -> Any:
+  d = db.query(KbDocument).filter(KbDocument.id == doc_id).first()
+  if not d:
+    raise HTTPException(status_code=404, detail="Document not found")
+  return _kb_doc_to_json(d)
+
+
+@app.delete("/kb/files/{doc_id}")
+def kb_delete(doc_id: str, db: Session = Depends(get_db)) -> Any:
+  d = db.query(KbDocument).filter(KbDocument.id == doc_id).first()
+  if not d:
+    raise HTTPException(status_code=404, detail="Document not found")
+  db.query(KbChunk).filter(KbChunk.document_id == doc_id).delete(synchronize_session=False)
+  db.delete(d)
+  db.commit()
+  return {"ok": True}
+
+
+class KbQueryRequest(BaseModel):
+  question: str
+  case_id: Optional[str] = None
+  document_ids: Optional[List[str]] = None
+  include_global: Optional[bool] = True
+  tier: Optional[str] = "fast"
+  style_level: Optional[str] = "simple"
+
+
+@app.post("/kb/query")
+async def kb_query(payload: KbQueryRequest, db: Session = Depends(get_db)) -> Any:
+  """One-shot grounded Q&A over any mix of documents (case-scoped + global)."""
+  ctx = retrieval_svc.build_context(
+    db,
+    case_id=payload.case_id,
+    question=payload.question,
+    document_ids=payload.document_ids,
+    include_global=bool(payload.include_global),
+  )
+  try:
+    content = await ai_service.call_ollama_rag(
+      model=ai_service.resolve_model(payload.tier),
+      messages=[{"role": "user", "content": payload.question}],
+      context_block=ctx.get("context_block", ""),
+      style_level=payload.style_level or "simple",
+      case_id=payload.case_id,
+    )
+  except Exception as e:
+    raise HTTPException(status_code=503, detail=f"AI service unavailable: {e}")
+  return {"content": content, "citations": ctx.get("citations", [])}
+
+
+@app.get("/explain")
+def explain_term(
+  term: str = Query(..., min_length=1),
+  case_id: Optional[str] = Query(None),
+  db: Session = Depends(get_db),
+) -> Any:
+  """Investigator-friendly explanation of a column / field / abbreviation.
+
+  Pulls up to 3 sample values from the given case (if any) so officers can
+  see what the field looks like in their own data.
+  """
+  return dict_svc.explain(db, term, case_id=case_id)
+
+
+@app.post("/kb/search")
+def kb_search(payload: KbQueryRequest, db: Session = Depends(get_db)) -> Any:
+  """Return retrieval results only (no LLM generation). Handy for debugging."""
+  ctx = retrieval_svc.build_context(
+    db,
+    case_id=payload.case_id,
+    question=payload.question,
+    document_ids=payload.document_ids,
+    include_global=bool(payload.include_global),
+  )
+  return {
+    "citations": ctx.get("citations", []),
+    "structured_fact": ctx.get("structured_fact"),
+    "entities_in_question": ctx.get("entities_in_question", {}),
+    "context_block": ctx.get("context_block", ""),
+  }
+
+
+# -----------------------------------------------------------------------------
+# Live MySQL connector (admin-configured external databases)
+# -----------------------------------------------------------------------------
+
+
+class MysqlConnectionBody(BaseModel):
+  name: str
+  host: str
+  port: Optional[int] = 3306
+  database: str
+  username: str
+  password: Optional[str] = None  # omitted on update to keep existing
+  ssl_enabled: Optional[bool] = False
+  notes: Optional[str] = None
+
+
+@app.get("/mysql/connections")
+def mysql_list(db: Session = Depends(get_db)) -> Any:
+  rows = db.query(MysqlConnection).order_by(MysqlConnection.created_at.desc()).all()
+  return [mysql_service.to_public_json(r) for r in rows]
+
+
+@app.post("/mysql/connections")
+def mysql_create(body: MysqlConnectionBody, db: Session = Depends(get_db)) -> Any:
+  if not body.password:
+    raise HTTPException(status_code=400, detail="password is required for new connections")
+  conn = MysqlConnection(
+    id=mysql_service.new_id(),
+    name=body.name,
+    host=body.host,
+    port=int(body.port or 3306),
+    database=body.database,
+    username=body.username,
+    password_encrypted=mysql_service.encrypt_password(body.password),
+    ssl_enabled=bool(body.ssl_enabled),
+    notes=body.notes,
+  )
+  db.add(conn)
+  db.commit()
+  return mysql_service.to_public_json(conn)
+
+
+def _get_conn(db: Session, conn_id: str) -> MysqlConnection:
+  row = db.query(MysqlConnection).filter(MysqlConnection.id == conn_id).first()
+  if not row:
+    raise HTTPException(status_code=404, detail="Connection not found")
+  return row
+
+
+@app.patch("/mysql/connections/{conn_id}")
+def mysql_update(conn_id: str, body: MysqlConnectionBody, db: Session = Depends(get_db)) -> Any:
+  conn = _get_conn(db, conn_id)
+  conn.name = body.name
+  conn.host = body.host
+  conn.port = int(body.port or 3306)
+  conn.database = body.database
+  conn.username = body.username
+  conn.ssl_enabled = bool(body.ssl_enabled)
+  conn.notes = body.notes
+  if body.password:
+    conn.password_encrypted = mysql_service.encrypt_password(body.password)
+  db.commit()
+  return mysql_service.to_public_json(conn)
+
+
+@app.delete("/mysql/connections/{conn_id}")
+def mysql_delete(conn_id: str, db: Session = Depends(get_db)) -> Any:
+  conn = _get_conn(db, conn_id)
+  db.delete(conn)
+  db.commit()
+  return {"ok": True}
+
+
+@app.post("/mysql/connections/{conn_id}/test")
+def mysql_test(conn_id: str, db: Session = Depends(get_db)) -> Any:
+  conn = _get_conn(db, conn_id)
+  return mysql_service.test_connection(db, conn)
+
+
+@app.get("/mysql/connections/{conn_id}/schema")
+def mysql_schema(conn_id: str, db: Session = Depends(get_db)) -> Any:
+  conn = _get_conn(db, conn_id)
+  try:
+    return mysql_service.list_schema(conn)
+  except Exception as e:
+    raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/mysql/connections/{conn_id}/tables/{table}/sample")
+def mysql_table_sample(conn_id: str, table: str, limit: int = 50, db: Session = Depends(get_db)) -> Any:
+  conn = _get_conn(db, conn_id)
+  try:
+    return mysql_service.sample_table(conn, table, limit=limit)
+  except ValueError as e:
+    raise HTTPException(status_code=400, detail=str(e))
+  except Exception as e:
+    raise HTTPException(status_code=502, detail=str(e))
+
+
+class MysqlQueryBody(BaseModel):
+  sql: str
+  max_rows: Optional[int] = 500
+
+
+@app.post("/mysql/connections/{conn_id}/query")
+def mysql_query(conn_id: str, body: MysqlQueryBody, db: Session = Depends(get_db)) -> Any:
+  conn = _get_conn(db, conn_id)
+  try:
+    return mysql_service.run_query(conn, body.sql, max_rows=int(body.max_rows or 500))
+  except ValueError as e:
+    raise HTTPException(status_code=400, detail=str(e))
+  except Exception as e:
+    raise HTTPException(status_code=502, detail=str(e))
 

@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, FolderOpen, Upload, MessageSquare, FileText,
   Users, Shield, LogOut, BookOpen, Brain, FolderArchive, Languages,
-  GitCompare, Trash2, Download, Cog, Mail, UserCog, KeyRound, ShieldCheck, Group, ToggleRight
+  GitCompare, Trash2, Download, Cog, Mail, UserCog, KeyRound, ShieldCheck, Group, ToggleRight, Database
 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/hooks/useAuth';
@@ -40,6 +40,7 @@ export function AppSidebar() {
 
   const adminNav = [
     { title: t('nav.settings'), url: '/admin/settings', icon: Cog },
+    { title: 'MySQL Connections', url: '/admin/mysql', icon: Database },
     { title: 'Data Cleanup', url: '/admin/cleanup', icon: Trash2 },
     { title: 'Data Export', url: '/admin/export', icon: Download },
   ];
@@ -140,10 +141,7 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="p-3 border-t border-sidebar-border space-y-2">
-<<<<<<< HEAD
         <p className="text-[10px] text-muted-foreground text-center">Made by Meit Swami</p>
-=======
->>>>>>> 190780503942b273a628c5916becb363ed820f3a
         <HealthIndicator />
         <div className="flex items-center justify-between">
           <NavLink to="/profile" className="flex flex-col min-w-0 hover:opacity-80" activeClassName="">

@@ -1,0 +1,225 @@
+{
+  "version": 1,
+  "terms": [
+    {
+      "key": "msisdn",
+      "aliases": ["phone", "mobile", "phone number", "mobile number", "subscriber", "target number", "target_msisdn"],
+      "category": "cdr",
+      "short": "The mobile phone number of a subscriber (Mobile Station International Subscriber Directory Number).",
+      "short_hi": "सब्सक्राइबर का मोबाइल नंबर (MSISDN)।",
+      "detail": "A 10–15 digit number that uniquely identifies a mobile subscription on a public telephone network. In Indian CDRs this is usually a 10-digit number (optionally prefixed with 91).",
+      "detail_hi": "मोबाइल सब्सक्राइबर की अंतर्राष्ट्रीय पहचान संख्या — भारत में आमतौर पर 10 अंकों की होती है (91 कोड के साथ या बिना)।"
+    },
+    {
+      "key": "calling_number",
+      "aliases": ["a party", "a_party", "caller", "calling", "from number", "source number", "party a", "target a party"],
+      "category": "cdr",
+      "short": "The number that initiated the call (A-party).",
+      "short_hi": "कॉल करने वाला नंबर (A-party).",
+      "detail": "In a CDR, the calling_number is the originator of the call or SMS. Direction of the call is derived from comparing calling_number / called_number to the subscriber being analysed.",
+      "detail_hi": "CDR में calling_number वह नंबर है जिसने कॉल या SMS शुरू किया। दिशा (incoming/outgoing) इस नंबर और called_number की तुलना से तय होती है।"
+    },
+    {
+      "key": "called_number",
+      "aliases": ["b party", "b_party", "called", "to number", "destination number", "party b", "other party", "contact_number"],
+      "category": "cdr",
+      "short": "The number that received the call (B-party).",
+      "short_hi": "जिसे कॉल की गई (B-party).",
+      "detail": "The recipient of the call or SMS. For a given subscriber, calls where they are in calling_number are outgoing; calls where they are in called_number are incoming."
+    },
+    {
+      "key": "call_date",
+      "aliases": ["date", "datetime", "timestamp", "call_time", "start time", "call start"],
+      "category": "cdr",
+      "short": "Date and time when the call started.",
+      "short_hi": "कॉल शुरू होने की तिथि और समय।",
+      "detail": "Normally stored in local (IST) time. Useful for hourly/daily pattern analysis, night-call percentage, and geofencing against tower locations."
+    },
+    {
+      "key": "duration",
+      "aliases": ["call_duration", "talk time", "dur", "duration_sec"],
+      "category": "cdr",
+      "short": "Call duration in seconds.",
+      "short_hi": "कॉल की अवधि (सेकंड में)।",
+      "detail": "Zero duration usually indicates a missed call or SMS; values under a few seconds can indicate burner-phone behaviour or network-drop."
+    },
+    {
+      "key": "call_type",
+      "aliases": ["type", "service_type", "call category", "toc", "connection_type"],
+      "category": "cdr",
+      "short": "Whether the record is voice, SMS, data, or a special service.",
+      "short_hi": "रिकॉर्ड का प्रकार — voice / SMS / data आदि।",
+      "detail": "Common values: VoiceMO (outgoing voice), VoiceMT (incoming voice), SMSMO (outgoing SMS), SMSMT (incoming SMS), GPRS / LTE (data session)."
+    },
+    {
+      "key": "imei",
+      "aliases": ["device id", "handset id", "imei_number"],
+      "category": "cdr",
+      "short": "International Mobile Equipment Identity — the 15-digit device fingerprint.",
+      "short_hi": "मोबाइल डिवाइस की 15-अंकीय विशिष्ट पहचान (IMEI).",
+      "detail": "A unique number assigned to the handset. Multiple SIMs on the same IMEI indicate the same physical phone; an IMEI change for the same number indicates a device swap. Tracked with TAC (Type Allocation Code) in the first 8 digits."
+    },
+    {
+      "key": "imsi",
+      "aliases": ["sim id", "imsi_number"],
+      "category": "cdr",
+      "short": "International Mobile Subscriber Identity — the 14–15 digit SIM fingerprint.",
+      "short_hi": "SIM कार्ड की 15-अंकीय विशिष्ट पहचान (IMSI).",
+      "detail": "Identifies the SIM itself, including operator (MCC+MNC prefix) and subscriber. A change of IMSI on the same IMEI indicates a SIM swap."
+    },
+    {
+      "key": "cell_id",
+      "aliases": ["cgi", "cell", "tower_id", "site_id", "lac_ci", "eci"],
+      "category": "cdr",
+      "short": "Identifier of the cell tower/sector used during the call.",
+      "short_hi": "कॉल के समय उपयोग में आए सेल टावर की पहचान (CGI / Cell-ID).",
+      "detail": "Combined with LAC/TAC, gives the geographic cell. Used for tower-dump cross-matching, suspect-movement trails, and proximity/geofence analysis."
+    },
+    {
+      "key": "tower_location",
+      "aliases": ["location", "address", "site name", "cell location"],
+      "category": "cdr",
+      "short": "Physical address or site name of the tower used during the event.",
+      "short_hi": "उस टावर का पता या साइट नाम जिसने कॉल हैंडल की।"
+    },
+    {
+      "key": "tower_lat",
+      "aliases": ["lat", "latitude"],
+      "category": "cdr",
+      "short": "Latitude of the serving tower.",
+      "short_hi": "सेवारत टावर का अक्षांश।"
+    },
+    {
+      "key": "tower_lng",
+      "aliases": ["lng", "long", "longitude"],
+      "category": "cdr",
+      "short": "Longitude of the serving tower.",
+      "short_hi": "सेवारत टावर का देशांतर।"
+    },
+    {
+      "key": "operator",
+      "aliases": ["network", "provider", "carrier"],
+      "category": "cdr",
+      "short": "The telecom operator (Airtel, Jio, Vi, BSNL, ...).",
+      "short_hi": "टेलीकॉम ऑपरेटर का नाम।"
+    },
+    {
+      "key": "source_ip",
+      "aliases": ["ip", "ip_address", "src_ip", "nat_ip"],
+      "category": "ipdr",
+      "short": "Originating IP address of the data session.",
+      "short_hi": "डेटा सेशन की स्रोत IP।",
+      "detail": "In IPDR, typically the NAT'd private/public IP assigned to the subscriber by the carrier for the session."
+    },
+    {
+      "key": "destination_ip",
+      "aliases": ["dest_ip", "dst_ip"],
+      "category": "ipdr",
+      "short": "Destination IP the subscriber connected to.",
+      "short_hi": "जिस IP से कनेक्ट किया गया उसका पता।"
+    },
+    {
+      "key": "source_port",
+      "aliases": ["src_port"],
+      "category": "ipdr",
+      "short": "Originating port for the data session."
+    },
+    {
+      "key": "destination_port",
+      "aliases": ["dest_port", "dst_port"],
+      "category": "ipdr",
+      "short": "Destination port of the remote service (e.g. 443 for HTTPS)."
+    },
+    {
+      "key": "protocol",
+      "aliases": ["proto"],
+      "category": "ipdr",
+      "short": "Network protocol — TCP, UDP, ICMP.",
+      "short_hi": "नेटवर्क प्रोटोकॉल (TCP/UDP/ICMP)."
+    },
+    {
+      "key": "session_start",
+      "aliases": ["timestamp", "session start"],
+      "category": "ipdr",
+      "short": "Start time of the data session."
+    },
+    {
+      "key": "data_volume",
+      "aliases": ["bytes", "bytes_transferred", "volume"],
+      "category": "ipdr",
+      "short": "Total bytes transferred during the session.",
+      "detail": "Uplink + downlink bytes. Useful for spotting large uploads (possible evidence transfer) or sustained streaming."
+    },
+    {
+      "key": "mobile_number",
+      "aliases": ["msisdn", "phone", "phone_number", "mobile"],
+      "category": "sdr",
+      "short": "The subscriber phone number (SDR / Subscriber Detail Record).",
+      "short_hi": "सब्सक्राइबर का फोन नंबर (SDR)."
+    },
+    {
+      "key": "subscriber_name",
+      "aliases": ["name", "customer_name"],
+      "category": "sdr",
+      "short": "Registered name of the subscriber as per KYC."
+    },
+    {
+      "key": "address",
+      "aliases": ["addr", "residential_address"],
+      "category": "sdr",
+      "short": "Registered address of the subscriber as per KYC."
+    },
+    {
+      "key": "activation_date",
+      "aliases": ["activation", "start_date"],
+      "category": "sdr",
+      "short": "Date the SIM/connection was activated.",
+      "short_hi": "सिम/कनेक्शन सक्रिय होने की तिथि।"
+    },
+    {
+      "key": "circle",
+      "aliases": ["plan_type", "plan", "tariff"],
+      "category": "sdr",
+      "short": "Telecom circle (Maharashtra, Delhi, Gujarat, ...) — the licensed service area for this connection."
+    },
+    {
+      "key": "id_type",
+      "aliases": ["id_proof_type", "document_type"],
+      "category": "sdr",
+      "short": "Type of identity proof submitted at KYC (Aadhaar, PAN, passport, ...)."
+    },
+    {
+      "key": "id_number",
+      "aliases": ["id_proof_number", "document_number"],
+      "category": "sdr",
+      "short": "Number of the identity proof submitted at KYC."
+    },
+    {
+      "key": "event_time",
+      "aliases": ["timestamp", "date", "datetime"],
+      "category": "tower",
+      "short": "Timestamp of the tower-dump event (call/SMS/LU).",
+      "short_hi": "टावर-डंप इवेंट का समय।"
+    }
+  ],
+  "abbreviations": {
+    "cdr": "Call Detail Record",
+    "ipdr": "Internet Protocol Detail Record",
+    "sdr": "Subscriber Detail Record",
+    "cgi": "Cell Global Identity — MCC + MNC + LAC + Cell-ID",
+    "mcc": "Mobile Country Code (e.g. 404/405 for India)",
+    "mnc": "Mobile Network Code — operator identifier within a country",
+    "lac": "Location Area Code — group of cells under one MSC",
+    "tac": "Tracking Area Code (LTE) or Type Allocation Code (IMEI)",
+    "lu": "Location Update — the phone registering with the network",
+    "mt": "Mobile Terminated (incoming to subscriber)",
+    "mo": "Mobile Originated (outgoing from subscriber)",
+    "smsmo": "Outgoing SMS from subscriber",
+    "smsmt": "Incoming SMS to subscriber",
+    "rat": "Radio Access Technology — 2G/3G/4G/5G",
+    "bts": "Base Transceiver Station — the physical radio at a tower",
+    "msc": "Mobile Switching Centre",
+    "kyc": "Know Your Customer — subscriber verification record",
+    "fir": "First Information Report"
+  }
+}

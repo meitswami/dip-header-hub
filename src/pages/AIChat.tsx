@@ -1,20 +1,25 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { api } from '@/lib/api';
-import { useAuth } from '@/hooks/useAuth';
+import { api, streamChat, type KbCitation } from '@/lib/api';
 import { useSpeechToText, useTextToSpeech } from '@/hooks/useSpeech';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Send, Bot, User, MessageSquare, Mic, MicOff, Volume2, VolumeX, Languages, Check, CheckCheck, FileSpreadsheet, Square } from 'lucide-react';
+import { Send, Bot, User, MessageSquare, Mic, MicOff, Volume2, VolumeX, Languages, CheckCheck, FileSpreadsheet, Square, Gauge } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 
-type Message = { role: 'user' | 'assistant'; content: string; timestamp: Date };
+type Message = {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+  citations?: KbCitation[];
+};
 
 function formatTime(date: Date) {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -63,10 +68,26 @@ function ChatBubble({ msg, onSpeak, isSpeaking }: { msg: Message; onSpeak: () =>
             <p className="whitespace-pre-wrap">{msg.content}</p>
           ) : (
             <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-              <ReactMarkdown>{msg.content}</ReactMarkdown>
+              <ReactMarkdown>{msg.content || '…'}</ReactMarkdown>
             </div>
           )}
         </div>
+
+        {/* Citations */}
+        {!isUser && msg.citations && msg.citations.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-1">
+            {msg.citations.map(c => (
+              <Badge
+                key={c.chunk_id}
+                variant="outline"
+                className="text-[10px] font-normal"
+                title={c.preview}
+              >
+                [{c.index}] {c.file_name || c.title}{c.locator ? ` — ${c.locator}` : ''}
+              </Badge>
+            ))}
+          </div>
+        )}
 
         {/* Timestamp + status */}
         <div className={`flex items-center gap-1 px-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -90,9 +111,8 @@ function ChatBubble({ msg, onSpeak, isSpeaking }: { msg: Message; onSpeak: () =>
 }
 
 export default function AIChat() {
-  const { user } = useAuth();
   const [searchParams] = useSearchParams();
-  const [cases, setCases] = useState<any[]>([]);
+  const [cases, setCases] = useState<{ id: string; title: string }[]>([]);
   const [selectedCase, setSelectedCase] = useState(searchParams.get('case') || '');
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -102,16 +122,16 @@ export default function AIChat() {
   const [numberSuggestions, setNumberSuggestions] = useState<{ number: string; count: number }[]>([]);
   const [suggestionOpen, setSuggestionOpen] = useState(false);
   const [viewNumber, setViewNumber] = useState<string | null>(null);
-  const [viewRecords, setViewRecords] = useState<any[]>([]);
+  const [viewRecords, setViewRecords] = useState<{ calling_number: string; called_number: string; call_date: string | null; call_type: string | null; duration: number | null }[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const streamAbortRef = useRef(false);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const streamControllerRef = useRef<AbortController | null>(null);
 
   const stt = useSpeechToText();
   const tts = useTextToSpeech();
 
   const [historyLoading, setHistoryLoading] = useState(false);
   const [styleLevel, setStyleLevel] = useState<'simple' | 'intermediate' | 'expert'>('simple');
+  const [tier, setTier] = useState<'fast' | 'accurate'>('fast');
 
   useEffect(() => {
     api.getCases().then(data => setCases(data)).catch(() => setCases([]));
@@ -120,7 +140,6 @@ export default function AIChat() {
   useEffect(() => {
     if (!selectedCase) { setMessages([]); return; }
     setHistoryLoading(true);
-<<<<<<< HEAD
     api.getChatLogs(selectedCase)
       .then(data => {
         if (data?.length) {
@@ -128,19 +147,6 @@ export default function AIChat() {
             role: d.role as 'user' | 'assistant',
             content: d.content,
             timestamp: d.created_at ? new Date(d.created_at) : new Date(),
-=======
-    supabase
-      .from('chat_logs')
-      .select('content, role, created_at')
-      .eq('case_id', selectedCase)
-      .order('created_at', { ascending: true })
-      .then(({ data }) => {
-        if (data?.length) {
-          setMessages(data.map((d: any) => ({
-            role: d.role as 'user' | 'assistant',
-            content: d.content,
-            timestamp: new Date(d.created_at),
->>>>>>> 190780503942b273a628c5916becb363ed820f3a
           })));
         } else {
           setMessages([]);
@@ -259,8 +265,9 @@ export default function AIChat() {
   };
 
   const stopStreaming = () => {
-    streamAbortRef.current = true;
-    abortControllerRef.current?.abort();
+    streamControllerRef.current?.abort();
+    streamControllerRef.current = null;
+    setLoading(false);
   };
 
   const sendMessage = async () => {
@@ -272,8 +279,8 @@ export default function AIChat() {
     stt.resetTranscript();
     if (stt.isListening) stt.stopListening();
     setLoading(true);
-    streamAbortRef.current = false;
-    abortControllerRef.current = new AbortController();
+    streamControllerRef.current?.abort();
+    streamControllerRef.current = null;
 
     // Rule-based FAQ / quick-action suggestions based on query category
     const q = userMsg.content.toLowerCase();
@@ -311,61 +318,46 @@ export default function AIChat() {
     }
     setQuickSuggestions(suggestions.slice(0, 3));
 
-    try {
-<<<<<<< HEAD
-      const chatPayload = newMessages.map(m => ({ role: m.role, content: m.content }));
+    const chatPayload = newMessages.map(m => ({ role: m.role, content: m.content }));
+    // Seed an empty assistant message that will be filled as tokens arrive.
+    setMessages(prev => [...prev, { role: 'assistant', content: '', timestamp: new Date(), citations: [] }]);
 
-      const resp = await fetch('http://localhost:8000/chat', {
-=======
-      const ollamaRaw = localStorage.getItem('dip-ollama-settings');
-      const ollamaSettings = ollamaRaw ? JSON.parse(ollamaRaw) : {};
-      const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-chat`;
-      const resp = await fetch(CHAT_URL, {
->>>>>>> 190780503942b273a628c5916becb363ed820f3a
-        method: 'POST',
-        signal: abortControllerRef.current?.signal,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          caseId: selectedCase,
-<<<<<<< HEAD
-          messages: chatPayload,
-          styleLevel,
-=======
-          ollamaUrl: ollamaSettings.url,
-          ollamaModel: ollamaSettings.model,
->>>>>>> 190780503942b273a628c5916becb363ed820f3a
-        }),
+    let accumulated = '';
+    const updateLastAssistant = (mutator: (m: Message) => Message) => {
+      setMessages(prev => {
+        if (!prev.length) return prev;
+        const last = prev[prev.length - 1];
+        if (last.role !== 'assistant') return prev;
+        return [...prev.slice(0, -1), mutator(last)];
       });
+    };
 
-      const data = await resp.json().catch(() => ({} as any));
-      if (!resp.ok || !data?.content) {
-        setMessages(prev => [...prev, { role: 'assistant', content: 'AI service unavailable. Try again.', timestamp: new Date() }]);
-      } else {
-        const content: string = data.content;
-        setMessages(prev => [...prev, { role: 'assistant', content, timestamp: new Date() }]);
-        if (autoSpeak && content) tts.speak(content);
+    streamControllerRef.current = streamChat(
+      {
+        caseId: selectedCase,
+        messages: chatPayload,
+        styleLevel,
+        tier,
+      },
+      {
+        onMeta: meta => updateLastAssistant(m => ({ ...m, citations: meta.citations || [] })),
+        onDelta: delta => {
+          accumulated += delta;
+          updateLastAssistant(m => ({ ...m, content: m.content + delta }));
+        },
+        onDone: () => {
+          setLoading(false);
+          if (autoSpeak && accumulated) tts.speak(accumulated);
+        },
+        onError: err => {
+          updateLastAssistant(m => ({
+            ...m,
+            content: m.content || `AI service unavailable (${err.message}).`,
+          }));
+          setLoading(false);
+        },
       }
-<<<<<<< HEAD
-    } catch {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'AI service unavailable. Try again.', timestamp: new Date() }]);
-=======
-
-      if (autoSpeak && assistantSoFar) tts.speak(assistantSoFar);
-
-      if (user && assistantSoFar) {
-        await supabase.from('chat_logs').insert([
-          { case_id: selectedCase, user_id: user.id, content: userMsg.content, role: 'user' },
-          { case_id: selectedCase, user_id: user.id, content: assistantSoFar, role: 'assistant' },
-        ] as any);
-      }
-    } catch (err: any) {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Error: ' + (err.message || 'Failed to get response'), timestamp: new Date() }]);
->>>>>>> 190780503942b273a628c5916becb363ed820f3a
-    } finally {
-      setLoading(false);
-    }
+    );
   };
 
   return (
@@ -397,6 +389,22 @@ export default function AIChat() {
               <SelectItem value="expert">Expert</SelectItem>
             </SelectContent>
           </Select>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Select value={tier} onValueChange={(v: 'fast' | 'accurate') => setTier(v)}>
+                <SelectTrigger className="w-32 h-8 text-xs">
+                  <Gauge className="h-3.5 w-3.5 mr-1" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fast">Fast (3B)</SelectItem>
+                  <SelectItem value="accurate">Accurate (7B)</SelectItem>
+                </SelectContent>
+              </Select>
+            </TooltipTrigger>
+            <TooltipContent>Fast: ~30-60 tok/s. Accurate: slower but higher quality.</TooltipContent>
+          </Tooltip>
 
           <Select value={stt.lang} onValueChange={(v: any) => stt.setLang(v)}>
             <SelectTrigger className="w-36 h-8 text-xs">

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
@@ -7,41 +7,19 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-<<<<<<< HEAD
-=======
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useToast } from '@/hooks/use-toast';
->>>>>>> 190780503942b273a628c5916becb363ed820f3a
 import { Loader2 } from 'lucide-react';
-
-interface StaffProfile {
-  id: string;
-  full_name: string;
-}
 
 export default function NewCase() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
-  const [staff, setStaff] = useState<StaffProfile[]>([]);
-  const [cioId, setCioId] = useState('');
   const [form, setForm] = useState({
     title: '', fir_number: '', sections: '', complainant: '', accused: '', description: '',
     case_date: '', status: 'open',
   });
 
-  useEffect(() => {
-    supabase.from('profiles').select('id, full_name').order('full_name')
-      .then(({ data }) => {
-        if (data) setStaff(data);
-        // Default CIO to current user
-        if (user && !cioId) setCioId(user.id);
-      });
-  }, [user?.id]);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-<<<<<<< HEAD
     if (!form.title.trim()) return;
     setLoading(true);
     try {
@@ -55,31 +33,6 @@ export default function NewCase() {
         description: form.description || undefined,
         case_date: form.case_date || undefined,
       });
-=======
-    if (!user || !cioId) return;
-    setLoading(true);
-    try {
-      const { data, error } = await supabase.from('cases').insert({
-        ...form,
-        case_date: form.case_date || null,
-        created_by: user.id,
-      }).select('id').single();
-
-      if (error) throw error;
-
-      // Assign CIO with case_incharge role
-      await supabase.from('case_assignments').insert({
-        case_id: data.id, user_id: cioId, case_role: 'case_incharge',
-      });
-
-      // If creator is different from CIO, add creator as analyst
-      if (cioId !== user.id) {
-        await supabase.from('case_assignments').insert({
-          case_id: data.id, user_id: user.id, case_role: 'analyst',
-        });
-      }
-
->>>>>>> 190780503942b273a628c5916becb363ed820f3a
       toast({ title: 'Case created successfully' });
       navigate(`/cases/${data.id}`);
     } catch (err: any) {
@@ -112,21 +65,6 @@ export default function NewCase() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="cio">Case Incharge (CIO) *</Label>
-              <Select value={cioId} onValueChange={setCioId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select Case Incharge..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {staff.map(s => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.full_name} {s.id === user?.id ? '(You)' : ''}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
               <Label htmlFor="sections">Applicable Sections</Label>
               <Input id="sections" value={form.sections} onChange={e => update('sections', e.target.value)} placeholder="e.g. IPC 420, IT Act 66C" />
             </div>
@@ -146,7 +84,7 @@ export default function NewCase() {
             </div>
             <div className="flex justify-end gap-3 pt-2">
               <Button type="button" variant="outline" onClick={() => navigate('/cases')}>Cancel</Button>
-              <Button type="submit" disabled={loading || !cioId}>
+              <Button type="submit" disabled={loading}>
                 {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Create Case
               </Button>

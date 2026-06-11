@@ -121,4 +121,279 @@ export const api = {
       `/cases/${caseId}/chat_logs`,
       limit != null ? { params: { limit: String(limit) } } : {}
     ),
+
+  // -----------------------------------------------------------------------
+  // Knowledge Base (universal document understanding + RAG)
+  // -----------------------------------------------------------------------
+
+  kbStatus: () =>
+    request<{
+      embedding: { loaded: boolean; model: string; dim: number; error: string | null };
+      chat_model_fast: string;
+      chat_model_accurate: string;
+      ollama_url: string;
+    }>(`/kb/status`),
+
+  kbFiles: (caseId?: string | null, includeGlobal = true) =>
+    request<KbDocument[]>(`/kb/files`, {
+      params: {
+        ...(caseId ? { case_id: caseId } : {}),
+        include_global: String(includeGlobal),
+      },
+    }),
+
+  kbDelete: (docId: string) =>
+    request<{ ok: boolean }>(`/kb/files/${docId}`, { method: 'DELETE' }),
+
+  kbUpload: async (
+    file: File,
+    opts?: {
+      caseId?: string | null;
+      category?: string;
+      tags?: string[];
+      title?: string;
+      uploadedBy?: string;
+    }
+  ) => {
+    const form = new FormData();
+    form.append('file', file);
+    if (opts?.caseId) form.append('case_id', opts.caseId);
+    if (opts?.category) form.append('category', opts.category);
+    if (opts?.tags?.length) form.append('tags', opts.tags.join(','));
+    if (opts?.title) form.append('title', opts.title);
+    if (opts?.uploadedBy) form.append('uploaded_by', opts.uploadedBy);
+    const res = await fetch(`${API_BASE}/kb/upload`, { method: 'POST', body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error((err as { detail?: string }).detail || 'Upload failed');
+    }
+    return res.json() as Promise<KbDocument>;
+  },
+
+  kbQuery: (payload: {
+    question: string;
+    case_id?: string | null;
+    document_ids?: string[];
+    include_global?: boolean;
+    tier?: 'fast' | 'accurate';
+    style_level?: 'simple' | 'intermediate' | 'expert';
+  }) =>
+    request<{ content: string; citations: KbCitation[] }>(`/kb/query`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  kbSearch: (payload: {
+    question: string;
+    case_id?: string | null;
+    document_ids?: string[];
+    include_global?: boolean;
+  }) =>
+    request<{
+      citations: KbCitation[];
+      structured_fact: string | null;
+      entities_in_question: Record<string, string[]>;
+      context_block: string;
+    }>(`/kb/search`, { method: 'POST', body: JSON.stringify(payload) }),
+
+  explainTerm: (term: string, caseId?: string | null) =>
+    request<ExplainResult>(`/explain`, {
+      params: { term, ...(caseId ? { case_id: caseId } : {}) },
+    }),
+
+  // -----------------------------------------------------------------------
+  // Live MySQL connector (admin feature)
+  // -----------------------------------------------------------------------
+
+  mysqlList: () => request<MysqlConnection[]>(`/mysql/connections`),
+
+  mysqlCreate: (body: MysqlConnectionInput) =>
+    request<MysqlConnection>(`/mysql/connections`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  mysqlUpdate: (id: string, body: MysqlConnectionInput) =>
+    request<MysqlConnection>(`/mysql/connections/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+
+  mysqlDelete: (id: string) =>
+    request<{ ok: boolean }>(`/mysql/connections/${id}`, { method: 'DELETE' }),
+
+  mysqlTest: (id: string) =>
+    request<{ ok: boolean; server_version?: string; error?: string }>(
+      `/mysql/connections/${id}/test`,
+      { method: 'POST' }
+    ),
+
+  mysqlSchema: (id: string) =>
+    request<MysqlSchema>(`/mysql/connections/${id}/schema`),
+
+  mysqlSample: (id: string, table: string, limit = 50) =>
+    request<MysqlResult>(
+      `/mysql/connections/${id}/tables/${encodeURIComponent(table)}/sample`,
+      { params: { limit: String(limit) } }
+    ),
+
+  mysqlQuery: (id: string, sql: string, maxRows = 500) =>
+    request<MysqlResult>(`/mysql/connections/${id}/query`, {
+      method: 'POST',
+      body: JSON.stringify({ sql, max_rows: maxRows }),
+    }),
 };
+
+export interface MysqlConnection {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+  ssl_enabled: boolean;
+  notes: string | null;
+  created_at: string | null;
+  last_tested_at: string | null;
+  last_test_ok: boolean | null;
+  last_test_error: string | null;
+}
+
+export interface MysqlConnectionInput {
+  name: string;
+  host: string;
+  port?: number;
+  database: string;
+  username: string;
+  password?: string;
+  ssl_enabled?: boolean;
+  notes?: string;
+}
+
+export interface MysqlSchema {
+  database: string;
+  tables: {
+    name: string;
+    estimated_rows: number;
+    columns: { name: string; type: string; nullable: boolean; key: string }[];
+  }[];
+}
+
+export interface MysqlResult {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  count: number;
+  truncated?: boolean;
+  table?: string;
+}
+
+export interface ExplainResult {
+  term: string;
+  matched: boolean;
+  key?: string;
+  category?: string;
+  short?: string;
+  short_hi?: string;
+  detail?: string;
+  detail_hi?: string;
+  aliases?: string[];
+  examples?: string[];
+  abbreviation?: string;
+  message?: string;
+}
+
+// -----------------------------------------------------------------------
+// Streaming chat (SSE) — `onMeta` fires once with citations; `onDelta` fires
+// for each token; `onDone` fires at the end. Returns an AbortController so
+// the UI can cancel.
+// -----------------------------------------------------------------------
+
+export interface KbCitation {
+  index: number;
+  document_id: string;
+  chunk_id: string;
+  file_name: string | null;
+  title: string | null;
+  source_type: string | null;
+  locator: string;
+  score: number;
+  preview: string;
+}
+
+export interface KbDocument {
+  id: string;
+  case_id: string | null;
+  file_name: string;
+  title: string | null;
+  category: string | null;
+  source_type: string | null;
+  status: 'processing' | 'completed' | 'error';
+  error_message: string | null;
+  chunk_count: number;
+  language: string | null;
+  tags: string[];
+  file_size: number | null;
+  processing_started_at: string | null;
+  processing_completed_at: string | null;
+  created_at: string | null;
+}
+
+export interface ChatStreamPayload {
+  caseId: string;
+  messages: { role: string; content: string }[];
+  styleLevel?: 'simple' | 'intermediate' | 'expert';
+  tier?: 'fast' | 'accurate';
+  document_ids?: string[];
+}
+
+export function streamChat(
+  payload: ChatStreamPayload,
+  handlers: {
+    onMeta?: (meta: { citations: KbCitation[]; structured_fact: string | null; entities_in_question: Record<string, string[]> }) => void;
+    onDelta?: (delta: string) => void;
+    onDone?: () => void;
+    onError?: (err: Error) => void;
+  }
+): AbortController {
+  const controller = new AbortController();
+  (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/chat/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      if (!res.ok || !res.body) throw new Error(`Stream failed: ${res.status}`);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let nlIdx: number;
+        while ((nlIdx = buffer.indexOf('\n\n')) !== -1) {
+          const frame = buffer.slice(0, nlIdx).trim();
+          buffer = buffer.slice(nlIdx + 2);
+          if (!frame.startsWith('data: ')) continue;
+          const json = frame.slice(6).trim();
+          if (!json) continue;
+          try {
+            const parsed = JSON.parse(json);
+            if (parsed.type === 'meta') handlers.onMeta?.(parsed);
+            else if (parsed.type === 'delta') handlers.onDelta?.(parsed.content || '');
+            else if (parsed.type === 'done') handlers.onDone?.();
+          } catch {
+            // ignore malformed frames
+          }
+        }
+      }
+      handlers.onDone?.();
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') return;
+      handlers.onError?.(err as Error);
+    }
+  })();
+  return controller;
+}
